@@ -1,267 +1,164 @@
-# Vantage Foundation
+# Vantage product foundation
 
-Vantage is a local Tauri command center for software development work across Git repositories. It gives one place to interact with headless development harnesses, inspect project state, manage tasks and sessions, read and render files, run terminals, and understand where work is inside larger plans or epics.
+Status: **Product direction**
 
-This is not an MVP document. Vantage is expected to grow continuously. Features may be added, reshaped, or removed as the product gets clearer. This document captures the current foundations and should be updated as decisions change.
+Vantage is a local desktop command center for software development across Git repositories. It
+brings agent conversations, project state, files, terminals, tasks, sessions, and larger plans into
+one connected workspace.
 
-## Fixed Decisions
+This is not a release checklist. It describes the product Vantage should grow into. The current
+delivery boundary lives in the [first vertical slice](architecture/vertical-slice.md), and current
+technical decisions live in the [architecture overview](architecture/README.md).
 
-- Vantage is a local desktop application built with Tauri.
-- The initial project unit is a Git repository.
-- Vantage acts as an aggregator command center for local development state.
-- Harnesses should run in headless managed mode.
-- The first agent experience is one chat session connected to one headless harness.
-- Multi-harness routing, orchestration, and delegation are future extensions of the same foundation.
-- Vantage should eventually support the full local development surface: reading and writing files, running commands, managing terminals, launching harnesses, tracking sessions, inspecting project state, and performing development actions.
-- The safety model must support both explicit approvals and policy-based autonomy.
+## Product intent
 
-## Product Intent
+Vantage should reduce the need to jump between terminals, file explorers, agent UIs, issue trackers,
+repository tools, build logs, and planning documents while working across projects.
 
-Vantage should reduce the need to jump between terminals, file explorers, chat sessions, agent UIs, issue trackers, repo tools, build logs, and planning documents while working on multiple projects.
+The app should eventually provide:
 
-The app should feel like a battle station for development work:
+- one place to register and switch among local Git projects;
+- one place to work with coding agents;
+- one place to inspect files and rendered artifacts;
+- one place to run and understand terminal activity;
+- one place to see threads, tasks, plans, and progress; and
+- one place to understand what is running, blocked, or waiting for intervention.
 
-- one place to open a Git repo,
-- one place to chat with a headless harness,
-- one place to inspect files and rendered documents,
-- one place to run terminals and commands,
-- one place to see sessions, tasks, plans, and progress,
-- one place to understand what is happening now and what needs intervention.
+The intended feeling is a development battle station: locally powerful, observable, and organized
+around the work rather than around any single tool.
 
-## Target Users
+## Product decisions
 
-The primary user is a developer or technical operator who works across multiple local repositories and wants tight integration with their machine, tools, agents, and development workflows.
+- Vantage is a local desktop application.
+- A project is initially a local Git repository.
+- Codex is the first provider and the first complete product experience.
+- The first experience is one user working in one selected project and one Codex thread at a time.
+- More providers may be supported later, but the common provider model must be extracted from real,
+  validated integrations rather than designed in advance.
+- Vantage owns its project registry, preferences, and UI projections. Git repositories, Codex
+  history, and external systems remain their own sources of truth.
+- Local power must remain visible and controllable through explicit runtime modes, approvals, and
+  recoverable state.
+- Files, terminals, tasks, and flow views remain part of the product direction even though they are
+  outside the first chat vertical slice.
 
-The product assumes the user is comfortable granting local power when useful, but wants visibility, control, and recoverability.
+The desktop runtime, process topology, protocol, and persistence choices are architecture decisions,
+not permanent product identity.
 
-## Core Surfaces
+## Target user
 
-### Project Explorer
+The primary user is a developer or technical operator who works across multiple local repositories
+and wants tight integration with their machine, tools, and agent workflows.
 
-The project explorer manages Git repositories as first-class workspaces.
+The product assumes the user is comfortable granting local power when useful, but wants to see what
+is happening, understand when input is required, interrupt work, and recover after failure.
 
-It should support:
+## Core concepts
 
-- adding local Git repositories,
-- switching between repositories,
-- showing repo identity and current branch,
-- surfacing dirty state and relevant project metadata,
-- opening repo-scoped tools such as chat, files, terminal, tasks, and sessions.
+Consistent names matter because Codex and Vantage both have lifecycle concepts:
 
-### Chat And Harness Interaction
+| Concept | Meaning in Vantage |
+| --- | --- |
+| Project | A registered local Git repository and its Vantage metadata. |
+| Thread | A durable conversation inside a project. It maps to a native Codex thread initially. |
+| Turn | One user request and the agent activity it causes inside a thread. |
+| Live session | The temporary runtime connection and child process serving an open thread. |
+| Task | A unit of planned work that may later link to projects, threads, files, or plans. |
 
-The first chat surface should connect one chat session to one headless harness.
+A live session is not the conversation's durable identity. Closing a process must not make a thread
+disappear.
 
-Initial harness candidates include:
+## Product surfaces
 
-- Codex,
-- Claude Code,
-- pi dev,
-- similar command-line or headless development agents.
+### Projects
 
-The chat surface should support:
+Projects are the top-level navigation unit. Vantage should support registering repositories,
+switching among them, showing repository identity and branch state, and opening project-scoped tools.
 
-- sending prompts to a selected harness,
-- streaming or polling harness output,
-- showing tool/action progress when available,
-- preserving session history,
-- associating each session with a Git repo,
-- making interruptions and approvals clear.
+### Agent chat
 
-The harness architecture should be adapter-based. Each harness adapter should normalize process launch, input, output, lifecycle, metadata, and recoverable session state into a common Vantage model.
+The chat surface should support durable threads, streamed turns, tool activity, interruptions,
+approvals, user-input requests, model and runtime choices, and clear recovery behavior.
+
+Codex comes first. Future providers should feel coherent in Vantage without flattening capabilities
+that are unique or useful.
+
+### Files and artifacts
+
+The file surface should grow from text and Markdown into code, images, PDFs, spreadsheets,
+documents, logs, and structured data. Humans and agents should be able to refer to the same artifact
+without leaving the project context.
 
 ### Terminal
 
-A terminal is foundational, not optional.
+The terminal is a foundational future surface. It should provide project-scoped shells, durable
+terminal state where practical, command status, and eventual links to threads and tasks.
 
-It should support:
+### Tasks and plans
 
-- opening repo-scoped shells,
-- running commands in the selected Git repository,
-- preserving terminal sessions where practical,
-- showing command state and exit codes,
-- allowing terminals to be linked to tasks, sessions, or harness activity later.
+Vantage should support local task lists, Kanban-style status, plans, and links among tasks, threads,
+files, commits, and external trackers. Local task state must remain useful without requiring a cloud
+service.
 
-### File Explorer
+### Sessions and activity
 
-The file explorer should support:
+An activity view should explain what is running, what happened, what changed, what is blocked, and
+where work can be resumed. Over time it may combine chat turns, terminal activity, file changes,
+approvals, errors, and generated artifacts.
 
-- browsing the selected Git repository,
-- opening files quickly,
-- reading text files,
-- rendering common document formats,
-- showing binary or unsupported files safely,
-- providing enough context for agents and humans to discuss files together.
+### Flow view
 
-File rendering should grow over time. Expected renderer categories include text, Markdown, code, images, PDFs, spreadsheets, documents, logs, and structured data.
+A future interactive graph should make larger work legible: epics, plans, dependencies, agent
+threads, blocked steps, intervention points, and relationships among artifacts. It is intended as a
+work surface, not merely a diagram.
 
-### Tasks And Kanban
+## Product principles
 
-Task tracking is a core local work surface.
+### Local first
 
-The task system should support:
+Project access and app state start on the user's machine. Vantage should aggregate existing sources
+of truth instead of copying them by default.
 
-- task lists,
-- Kanban-style status views,
-- linking tasks to Git repos,
-- linking tasks to sessions,
-- linking tasks to files or plans,
-- lightweight updates without requiring an external tracker.
+### Native capability before abstraction
 
-Vantage may aggregate from external trackers later, but local task state must be useful on its own.
+The first integration should expose useful Codex behavior directly. Provider-neutral seams should
+appear only when multiple concrete implementations show what is genuinely shared.
 
-### Sessions
+### Thin end-to-end slices
 
-Sessions represent units of active or historical work.
+Each delivery should prove a complete user outcome across UI, persistence, process lifecycle, and
+recovery. The first such outcome is Codex chat, not a collection of disconnected shells.
 
-A session may include:
+### Observable power
 
-- a chat with a harness,
-- terminal activity,
-- file changes,
-- task updates,
-- plan steps,
-- approvals,
-- errors,
-- generated artifacts,
-- links to commits, branches, or PRs later.
+The interface should show runtime mode, active work, approvals, failures, and interruption controls.
+Sensitive actions should be attributable to a project and turn.
 
-The session view should answer:
+### Recoverable state
 
-- what is running,
-- what happened,
-- what is blocked,
-- what needs user input,
-- what changed,
-- where to resume.
+Vantage should distinguish durable identity from live processes, avoid silently replaying uncertain
+work, and make restart and resume behavior explicit.
 
-### Flow View
+## Long-term safety direction
 
-Vantage should include a React Flow-style map for larger work.
+Vantage should support both explicit approvals and policy-based autonomy. Sensitive actions include
+file mutation, deletion, command execution, dependency installation, Git changes, long-running
+services, network operations, and destructive local actions.
 
-The flow view should help visualize and interact with:
+The UI should explain what will happen, where it will happen, which policy permits it, and whether it
+is reversible. Provider output and paths remain untrusted input even in a local application.
 
-- plans,
-- epics,
-- task dependencies,
-- agent sessions,
-- progress through a process,
-- blocked steps,
-- intervention points,
-- relationships between files, tasks, sessions, and outcomes.
+## Direction still open
 
-This is not just a diagram. It should become an interactive work surface where a user can inspect nodes, open related files or sessions, and eventually trigger actions.
+- How should activity from multiple projects be summarized without becoming noisy?
+- Which file and terminal capabilities should follow the chat slice?
+- What is the smallest useful local task model?
+- How should local tasks synchronize with repository files or external trackers?
+- What should the first flow view make actionable rather than merely visible?
+- Which second provider would provide the best evidence for an eventual provider abstraction?
 
-## Harness Runner Foundation
+## North star
 
-Vantage should run harnesses headlessly from the Tauri backend.
-
-The runner should be responsible for:
-
-- launching harness processes,
-- selecting the working directory,
-- passing environment variables,
-- capturing stdout, stderr, structured events, and exit state,
-- sending user input,
-- handling cancellation and interruption,
-- preserving logs,
-- recovering useful state after app restart where possible,
-- enforcing approval and policy rules.
-
-The first implementation can support one harness adapter and one active chat session. The architecture should still assume more adapters and richer routing later.
-
-## Common Harness Adapter Shape
-
-Each adapter should define:
-
-- harness id,
-- display name,
-- availability check,
-- launch command,
-- required configuration,
-- input protocol,
-- output parser,
-- session metadata,
-- cancellation behavior,
-- approval behavior,
-- error normalization.
-
-Adapters should avoid leaking harness-specific details into the UI unless the detail is useful to the user.
-
-## State Model
-
-Vantage is primarily an aggregator, but it needs durable local state for its own work surfaces.
-
-Initial local state should cover:
-
-- registered Git repositories,
-- app preferences,
-- harness configuration,
-- chat sessions,
-- terminal sessions where practical,
-- tasks,
-- session metadata,
-- flow nodes and edges,
-- file/render history where useful.
-
-Repo files, Git history, external trackers, and harness logs may remain external sources of truth. Vantage should reference and aggregate them rather than copying everything by default.
-
-## Safety Model
-
-Vantage should support two safety modes:
-
-- explicit approvals for sensitive actions,
-- policy-based autonomy for actions the user has pre-approved.
-
-Sensitive actions include:
-
-- editing files,
-- deleting files,
-- running commands,
-- installing dependencies,
-- modifying Git state,
-- launching long-running services,
-- invoking harnesses with write access,
-- networked actions,
-- destructive local operations.
-
-Approval prompts should be clear about:
-
-- what will run,
-- where it will run,
-- what files or systems may be affected,
-- whether the action is reversible,
-- what policy allowed or blocked it.
-
-## Initial Build Sequence
-
-This is not an MVP boundary. It is the current practical order for laying the foundation.
-
-1. Create the Tauri application shell.
-2. Add repository registration and project switching.
-3. Add a repo-scoped file explorer with basic text and Markdown rendering.
-4. Add a repo-scoped terminal.
-5. Add the harness runner foundation.
-6. Add one headless harness adapter.
-7. Add one chat session connected to that harness.
-8. Add durable session records.
-9. Add local task tracking.
-10. Add a basic Kanban/task view.
-11. Add the first session view.
-12. Add the first flow view for plans, tasks, sessions, and progress.
-
-## Open Questions
-
-- Which harness should be integrated first?
-- What local database or persistence layer should Vantage use?
-- Should terminals be fully embedded PTYs from the start, or can the first version use a simpler command runner?
-- Which file renderers are required first?
-- How should Vantage detect and represent active work across multiple Git repositories?
-- What should the first policy-based autonomy controls look like?
-- Should task state live only in Vantage state, optionally in repo files, or both?
-
-## Current North Star
-
-Vantage should become the local command center where a developer can open a Git repo, talk to a headless agent, inspect and render files, run terminals, track tasks, review sessions, and see work unfold through a visual process map.
-
-The foundation must make those surfaces feel connected from the beginning, even while individual features continue to change.
+Vantage should become the local workspace where a developer can open a project, work with coding
+agents, inspect and change artifacts, run commands, organize tasks, and see larger work unfold—with
+enough control and context to trust what the system is doing.
