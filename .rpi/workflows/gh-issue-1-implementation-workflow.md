@@ -7,7 +7,7 @@
 - Task branch: `rpi/gh-issue-1-spike-pinned-deno-desktop-and`
 - Supervisor status: `running`
 - Current phase: `6`
-- Last updated: `2026-07-23T18:49:58-04:00`
+- Last updated: `2026-07-23T19:18:15-04:00`
 
 | Phase | Status | Codex task | Checkpoint commit | Notes |
 |---|---|---|---|---|
@@ -16,7 +16,7 @@
 | 3 | `completed` | `019f903b-ef57-7eb0-9093-4847309163c5` | `2be6613ed72c9c1d494c471ed888817710d25a80` | Offline lifecycle/evidence gate; 20/20 tests |
 | 4 | `completed` | initial `019f9067-dad2-79a3-9c27-5f094145c94a`; plan correction `019f90d5-c594-7d73-89ec-61bb4fd92ce2`; retry `019f90e6-a4a4-7343-9cd8-d79b1213c1aa` | `5d7810ac87f97dae29841ecb7fc464849ad798ae` | Revised gate passed: 12/12 shutdown tests, empty remaining PIDs, settled direct status and drains; immediate `setsid` remains a documented fail-closed limitation |
 | 5 | `completed` | `019f90f3-3723-7c73-a296-0973bd62573c` | `a5c1ae46e8ad571d0d5e3b62be97e4031d833e06` | Authenticated test and verify-only run passed; committed coverage remained byte-identical |
-| 6 | `pending` | — | — | Requires completed Phases 4 and 5 |
+| 6 | `retrying` | initial `019f912c-d87e-7e21-919a-3ecdd8b88dda` | `d82df8b5470e8dc879bd3378985fb658adfca5e7` | Publisher/rejection implementation checkpointed; first live accept stopped before publication at `AGENT_TEXT_MISMATCH` |
 
 ## Superseded Blocker
 
