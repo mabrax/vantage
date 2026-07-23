@@ -34,7 +34,8 @@ for (const suite of suites) {
     console.log(`Skipping ${suite.task}: phase files not present`);
     continue;
   }
-  const child = new Deno.Command("deno", {
+  const denoCommand = Deno.execPath().split("/").at(-1)!;
+  const child = new Deno.Command(denoCommand, {
     args: ["task", suite.task],
     stdin: "inherit",
     stdout: "inherit",

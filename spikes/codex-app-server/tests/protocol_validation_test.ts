@@ -109,6 +109,28 @@ Deno.test("validates complete known envelopes and rejects unknown or malformed m
       userAgent: "codex",
     },
   });
+  validator.validateGenericMessage({
+    method: "skills/changed",
+    params: {},
+  });
+  validator.validateEnvelope("server-notification", {
+    method: "skills/changed",
+    params: {},
+  });
+  validator.validateResponseEnvelope("client-request", "initialize", {
+    id: 1,
+    error: {
+      code: -32601,
+      message: "Method not found",
+    },
+  });
+  validator.validateErrorResponseEnvelope({
+    id: "server-request-1",
+    error: {
+      code: -32601,
+      message: "Method not found",
+    },
+  });
   assertThrowsCode(
     () =>
       validator.validateEnvelope("client-request", {
@@ -137,6 +159,22 @@ Deno.test("validates complete known envelopes and rejects unknown or malformed m
         result: {},
       }),
     "PROTOCOL_RESPONSE_ENVELOPE_INVALID",
+  );
+  assertThrowsCode(
+    () =>
+      validator.validateErrorResponseEnvelope({
+        id: 1,
+        error: { code: "not-an-int64", message: "bad" },
+      }),
+    "PROTOCOL_RESPONSE_ENVELOPE_INVALID",
+  );
+  assertThrowsCode(
+    () =>
+      validator.validateEnvelope("server-notification", {
+        method: "future/notification",
+        params: {},
+      }),
+    "UNKNOWN_PROTOCOL_METHOD",
   );
 });
 

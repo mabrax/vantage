@@ -291,6 +291,20 @@ export class ProtocolValidator {
     method: string,
     envelope: unknown,
   ): void {
+    if (
+      envelope !== null && typeof envelope === "object" &&
+      "error" in envelope
+    ) {
+      const errorEnvelope = this.compiledSchemas.get("JSONRPCError.json");
+      if (!errorEnvelope || !errorEnvelope(envelope)) {
+        throw new SchemaValidationError(
+          "PROTOCOL_RESPONSE_ENVELOPE_INVALID",
+          `error response envelope for ${method} is not valid JSON-RPC`,
+          errorEnvelope?.errors ?? [],
+        );
+      }
+      return;
+    }
     const generic = this.compiledSchemas.get("JSONRPCResponse.json");
     if (!generic || !generic(envelope)) {
       throw new SchemaValidationError(
@@ -303,6 +317,28 @@ export class ProtocolValidator {
       ? (envelope as Record<string, unknown>).result
       : undefined;
     this.validateResult(direction, method, result);
+  }
+
+  validateGenericMessage(envelope: unknown): void {
+    const validate = this.compiledSchemas.get("JSONRPCMessage.json");
+    if (!validate || !validate(envelope)) {
+      throw new SchemaValidationError(
+        "PROTOCOL_ENVELOPE_INVALID",
+        "value is not a generated JSON-RPC message",
+        validate?.errors ?? [],
+      );
+    }
+  }
+
+  validateErrorResponseEnvelope(envelope: unknown): void {
+    const validate = this.compiledSchemas.get("JSONRPCError.json");
+    if (!validate || !validate(envelope)) {
+      throw new SchemaValidationError(
+        "PROTOCOL_RESPONSE_ENVELOPE_INVALID",
+        "value is not a generated JSON-RPC error response",
+        validate?.errors ?? [],
+      );
+    }
   }
 }
 
