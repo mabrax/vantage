@@ -1,0 +1,35 @@
+---
+task: gh-issue-1-spike-pinned-deno-desktop-and
+type: red-team
+repo: vantage
+branch: main
+sha: d9909976312fffa50ea239a17e819104f4a7a18c
+---
+
+# Red-Team Design: Pinned Deno and Codex app-server compatibility spike
+
+Exactly one adversarial challenge round examined all eight design-discussion decisions and the consequential TDD-only choices. Objections were admitted only after their cited artifact, repository, pinned-schema, or dependency evidence was verified.
+
+## Challenged decisions
+
+| decision | objection | evidence | disposition |
+| --- | --- | --- | --- |
+| Store `candidate` / `validated` in the compatibility manifest and hash that manifest into the acceptance summary | Changing the stored status changes the compatibility hash, so evidence for the candidate becomes stale while a validated manifest cannot exist before matching evidence. | The original cycle is recorded at `04-design-discussion.md:233`; the summary hashes compatibility and the publisher previously replaced only evidence. | **Revised.** Removed mutable status and the run-specific coverage hash from immutable compatibility inputs. Validation status is now derived from a matching summary (`05-tdd.md:78-82`), and explicit acceptance stages coverage, transcript, and summary (`05-tdd.md:707-721`). |
+| Derive complete stable-surface coverage from a retained stdout-only transcript | Client requests and the `initialized` client notification cannot occur in a journal containing only server stdout records, so their `observedCount` and `exercised` dispositions were unprovable. | The coverage requirement includes all protocol directions (`docs/architecture/codex-app-server.md:174-176`, `:333-341`); the contradiction is recorded at `04-design-discussion.md:251`. | **Revised.** The retained protocol journal is bidirectional, with a host `observationIndex` and server-only `wireIndex`; coverage is derived from schema-valid records in both directions (`05-tdd.md:177-190`, `:291-320`, `:359-366`). |
+| Compile generated schemas with an unspecified “JSON Schema 2020-compatible” Ajv dependency | Codex 0.145.0 emits draft-07 schemas with nonstandard numeric formats; Ajv's 2020-12 class is not backward compatible and strict compilation rejects unknown formats by default. | Locally regenerated pinned schemas declare draft-07 and use `uint`, `uint16`, `uint32`, and `int64`; Ajv documents [draft incompatibility](https://ajv.js.org/json-schema.html#draft-2020-12-breaking) and [unknown-format compilation failure](https://ajv.js.org/strict-mode.html#unknown-formats). | **Revised.** Pin Ajv's draft-07 class, register explicit Codex numeric-format validators, keep unknown formats fatal, and compile every generated top-level schema in a deterministic test (`05-tdd.md:132-143`, `:734`). |
+| Read `model/list` pages until `nextCursor` is null | The pinned response schema requires only `data`, so an absent cursor is valid; without absent-cursor termination, repeated-cursor detection, or page/deadline bounds, catalog discovery can loop indefinitely. | Pinned Codex 0.145.0 `v2/ModelListResponse.json` requires only `data`; the ticket requires `model/list` (`ticket.md:34`), and the original gap is recorded at `04-design-discussion.md:321`. | **Revised.** Null or absent cursors terminate, repeated cursors fail, and `maxModelPages` plus `modelCatalogMs` bound discovery before `thread/start` (`05-tdd.md:64-75`, `:658-661`). |
+| Correlate requests using the design-discussion write-then-register pattern | A fast response can arrive after the write becomes visible but before the pending entry exists, producing an unknown-ID failure and orphaning the intended promise. | The design snippet contradicted the TDD's register-before-write rule; the corrected record and rationale are at `04-design-discussion.md:285` and `:414-422`. | **Revised.** Register before enqueue/write, journal immediately before the serialized write, and remove the pending entry if enqueue or write fails (`05-tdd.md:622-630`). |
+| Assign `wireIndex` after schema validation and call the message queue merely “bounded” | An invalid complete frame could disappear from diagnostic ordering, and no named count/byte limit implemented the repository's required tested queue bound. | The corrected objection is recorded at `04-design-discussion.md:285`; the repository requires queue-length and retained-byte bounds (`docs/architecture/reliability.md:205-215`). | **Revised.** Assign `observationIndex` and `wireIndex` at complete-frame extraction before decoding/validation, and enforce manifest `maxQueueMessages` and `maxQueueBytes` with boundary/overflow tests (`05-tdd.md:634-655`). |
+| Prove no descendants remain by signaling one Unix process group and polling recorded descendants/group members | A descendant can call `setsid()`, leave the owned group, and be reparented before polling discovers it; an empty snapshot can therefore overclaim the ticket's absolute descendant-cleanup gate. | The ticket requires the process and descendants to exit (`ticket.md:40`); repository reliability requires no app-server descendants (`docs/architecture/reliability.md:22`); the unresolved race is recorded at `04-design-discussion.md:303`. | **Unresolvable.** Polling may set only `noObservedDescendantsRemain`. `escapedDescendantContainmentProven` defaults false, so the pair stays unvalidated until race-closing containment or event tracking passes an immediate-`setsid` fake-child test and the real app-server run (`05-tdd.md:428-438`, `:777-783`). |
+
+## Unchallenged decisions
+
+- Exact Deno 2.9.3 and Codex CLI 0.145.0 pins, stable generator mode, and exact runtime equality passed: the ticket requires exact versions and the repository requires version-matched generated contracts.
+- Path-sorted `path + NUL + bytes + NUL` hashing, separation of generation metadata, and temporary regeneration of unmodified generated trees passed.
+- Separation of process ownership, JSONL correlation, scenario policy, transcript recording, and shutdown passed the repository-pattern check.
+- Treating `account !== null` as the authentication predicate passed; the supplied research records an authenticated ChatGPT account that still reported `requiresOpenaiAuth: true`.
+- Recording then failing unknown notifications/requests in this exact-version acceptance gate passed; it preserves evidence while refusing to claim a fully pinned schema-valid run.
+- Raw-before-redaction validation, schema-preserving redaction, lifecycle identity continuity, item ordering, and a non-empty completed agent message passed.
+- Memoized close, graceful-to-TERM-to-KILL escalation, direct-status/drain waits, and the guarded negative-PID operation passed; only the escaped-descendant proof remains unresolved.
+- Stable actionable diagnostics, explicit authenticated-test gating, offline fake-child tests, and measured safety timeouts without invented performance thresholds passed.
+- Cross-hash rejection of partially published evidence passed after removing the self-invalidating status transition and making run-derived coverage an explicit acceptance output.
