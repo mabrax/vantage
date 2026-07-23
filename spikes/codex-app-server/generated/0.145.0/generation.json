@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "codexVersion": "0.145.0",
+  "codexVersionOutput": "codex-cli 0.145.0",
+  "experimental": false,
+  "commands": {
+    "types": [
+      "app-server",
+      "generate-ts",
+      "--out",
+      "{output}"
+    ],
+    "jsonSchema": [
+      "app-server",
+      "generate-json-schema",
+      "--out",
+      "{output}"
+    ]
+  },
+  "generatedAt": "2026-07-23T17:24:37.000Z",
+  "fileCounts": {
+    "types": 617,
+    "jsonSchema": 273
+  },
+  "bundleSha256": "f6704018971b3b5e4ea0ffcd3e73b8d7dee4fd50435ed59467639936cb0e19c1",
+  "regenerationSha256": "c1c45e67f86e39e5c65c858865e7ef90d32d3adf3354107ffe24a80c3973ca78",
+  "orderingException": "json-schema/codex_app_server_protocol.v2.schemas.json"
+}

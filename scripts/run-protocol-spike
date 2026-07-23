@@ -1,0 +1,8 @@
+#!/bin/sh
+
+if ! command -v deno >/dev/null 2>&1; then
+  printf '%s\n' '{"code":"DENO_NOT_FOUND","stage":"developer-launcher","expected":"2.9.3","observed":"not found on PATH","nextAction":"Install Deno 2.9.3 and rerun scripts/run-protocol-spike."}' >&2
+  exit 127
+fi
+
+exec deno task spike:verify "$@"
