@@ -6,6 +6,7 @@ import {
   type ProtocolDirection,
 } from "./config.ts";
 import { extractMethodsFromUnionSchema } from "./protocol_validation.ts";
+import type { RetainedProtocolRecord } from "./transcript.ts";
 
 const DIRECTION_ORDER: ProtocolDirection[] = [
   "client-request",
@@ -153,4 +154,91 @@ export function buildBaselineCoverage(
 
 export function serializeCoverage(coverage: CoverageManifest): Uint8Array {
   return canonicalJsonBytes(coverage);
+}
+
+export function deriveCoverageFromJournal(
+  baseline: CoverageManifest,
+  surface: StableSurface,
+  journal: readonly RetainedProtocolRecord[],
+  supplied?: CoverageManifest,
+): CoverageManifest {
+  validateCoverageMembership(baseline, surface);
+  const counts = new Map<string, number>();
+  for (const record of journal) {
+    if (record.schema.valid !== true) {
+      throw new ContractError(
+        "JOURNAL_SCHEMA_PROOF_MISSING",
+        `journal record ${record.observationIndex} lacks schema proof`,
+      );
+    }
+    let direction: ProtocolDirection | undefined;
+    let method: string | undefined;
+    if (record.direction === "client") {
+      if (record.method === "<server-request-response>") {
+        continue;
+      }
+      direction = record.id === undefined
+        ? "client-notification"
+        : "client-request";
+      method = record.method;
+    } else if (record.envelope?.kind === "server-notification") {
+      direction = "server-notification";
+      method = record.envelope.method;
+    } else if (record.envelope?.kind === "server-request") {
+      direction = "server-request";
+      method = record.envelope.method;
+    }
+    if (direction === undefined || method === undefined) continue;
+    const key = entryKey({ direction, method });
+    if (!expectedCoverageKeys(surface).includes(key)) {
+      throw new ContractError(
+        "JOURNAL_METHOD_OUTSIDE_STABLE_SURFACE",
+        `journal contains ${direction} ${method} outside generated membership`,
+      );
+    }
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const entries = baseline.entries.map((entry): CoverageEntry => {
+    const observedCount = counts.get(entryKey(entry)) ?? 0;
+    if (observedCount === 0) {
+      return { ...entry, observedCount: 0 };
+    }
+    if (entry.disposition === "unsupported") {
+      throw new ContractError(
+        "UNSUPPORTED_METHOD_OBSERVED",
+        `unsupported ${entry.direction} ${entry.method} occurred`,
+        { observedCount },
+      );
+    }
+    if (entry.disposition === "intentionally-ignored") {
+      return { ...entry, observedCount };
+    }
+    return {
+      ...entry,
+      disposition: "exercised",
+      rationale:
+        "Observed as a schema-valid record in the bidirectional protocol journal.",
+      observedCount,
+    };
+  });
+  const derived: CoverageManifest = { ...baseline, entries };
+  validateCoverageMembership(derived, surface);
+
+  if (supplied !== undefined) {
+    validateCoverageMembership(supplied, surface);
+    const facts = (coverage: CoverageManifest) =>
+      coverage.entries.map((entry) => ({
+        key: entryKey(entry),
+        disposition: entry.disposition,
+        observedCount: entry.observedCount,
+      })).sort((left, right) => left.key.localeCompare(right.key));
+    if (JSON.stringify(facts(supplied)) !== JSON.stringify(facts(derived))) {
+      throw new ContractError(
+        "COVERAGE_JOURNAL_DISAGREEMENT",
+        "supplied coverage counts or dispositions disagree with the journal",
+      );
+    }
+  }
+  return derived;
 }

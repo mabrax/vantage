@@ -29,6 +29,46 @@ const changedNotification = {
   method: "skills/changed",
   params: {},
 };
+const lifecycleModel = {
+  id: "offline-model-id",
+  model: "offline-model",
+  displayName: "Offline model",
+  description: "Deterministic fake model",
+  hidden: false,
+  supportedReasoningEfforts: [],
+  defaultReasoningEffort: "medium",
+  isDefault: true,
+};
+
+function lifecycleThread(cwd: unknown) {
+  return {
+    id: "thread-native-001",
+    sessionId: "session-native-001",
+    preview: "",
+    ephemeral: true,
+    modelProvider: "fake",
+    createdAt: 1,
+    updatedAt: 1,
+    status: { type: "idle" },
+    cwd,
+    cliVersion: "0.145.0",
+    source: "appServer",
+    turns: [],
+  };
+}
+
+function lifecycleTurn(status: "inProgress" | "completed" | "failed") {
+  return {
+    id: "turn-native-001",
+    items: [],
+    status,
+  };
+}
+
+function isLifecycleMode(selectedMode: string): boolean {
+  return selectedMode === "full-lifecycle" ||
+    selectedMode.startsWith("lifecycle-");
+}
 
 async function writeAll(
   writer: { write(data: Uint8Array): Promise<number> },
@@ -181,7 +221,151 @@ async function main(): Promise<void> {
         continue;
       }
       if (mode === "interleaved") await writeJson(changedNotification);
-      await writeJson({ id: envelope.id, result: accountResult });
+      const selectedAccountResult = mode === "lifecycle-account-null"
+        ? { account: null, requiresOpenaiAuth: true }
+        : mode === "lifecycle-auth-flag"
+        ? { account: { type: "apiKey" }, requiresOpenaiAuth: true }
+        : accountResult;
+      await writeJson({ id: envelope.id, result: selectedAccountResult });
+      continue;
+    }
+    if (envelope.method === "model/list" && isLifecycleMode(mode)) {
+      const params = envelope.params as Record<string, unknown> | undefined;
+      const cursor = params?.cursor;
+      if (mode === "lifecycle-cursor-absent") {
+        await writeJson({
+          id: envelope.id,
+          result: { data: [lifecycleModel] },
+        });
+        continue;
+      }
+      if (mode === "lifecycle-repeated-cursor") {
+        await writeJson({
+          id: envelope.id,
+          result: { data: [lifecycleModel], nextCursor: "repeat" },
+        });
+        continue;
+      }
+      if (mode === "lifecycle-endless-pages") {
+        const page = typeof cursor === "string"
+          ? Number(cursor.replace("page-", ""))
+          : 0;
+        await writeJson({
+          id: envelope.id,
+          result: {
+            data: [lifecycleModel],
+            nextCursor: `page-${page + 1}`,
+          },
+        });
+        continue;
+      }
+      if (cursor === undefined) {
+        await writeJson({
+          id: envelope.id,
+          result: {
+            data: [lifecycleModel],
+            nextCursor: mode === "lifecycle-cursor-null" ? null : "page-2",
+          },
+        });
+      } else {
+        await writeJson({
+          id: envelope.id,
+          result: { data: [lifecycleModel], nextCursor: null },
+        });
+      }
+      continue;
+    }
+    if (envelope.method === "thread/start" && isLifecycleMode(mode)) {
+      const params = envelope.params as Record<string, unknown>;
+      const thread = lifecycleThread(params.cwd);
+      await writeJson({
+        id: envelope.id,
+        result: {
+          thread,
+          model: "offline-model",
+          modelProvider: "fake",
+          cwd: params.cwd,
+          instructionSources: [],
+          approvalPolicy: "never",
+          approvalsReviewer: "user",
+          sandbox: { type: "readOnly" },
+        },
+      });
+      await writeJson({ method: "thread/started", params: { thread } });
+      continue;
+    }
+    if (envelope.method === "turn/start" && isLifecycleMode(mode)) {
+      const params = envelope.params as Record<string, unknown>;
+      const threadId = params.threadId;
+      const activeTurn = lifecycleTurn("inProgress");
+      await writeJson({
+        id: envelope.id,
+        result: { turn: activeTurn },
+      });
+      await writeJson({
+        method: "turn/started",
+        params: { threadId, turn: activeTurn },
+      });
+      const startedItem = {
+        type: "agentMessage",
+        id: "item-native-001",
+        text: "",
+      };
+      await writeJson({
+        method: "item/started",
+        params: {
+          item: startedItem,
+          threadId,
+          turnId: activeTurn.id,
+          startedAtMs: 1,
+        },
+      });
+      const completedText = mode === "lifecycle-empty-agent"
+        ? ""
+        : "Offline lifecycle complete.";
+      if (completedText.length > 0) {
+        await writeJson({
+          method: "item/agentMessage/delta",
+          params: {
+            threadId,
+            turnId: activeTurn.id,
+            itemId: startedItem.id,
+            delta: "Offline ",
+          },
+        });
+        await writeJson({
+          method: "item/agentMessage/delta",
+          params: {
+            threadId,
+            turnId: activeTurn.id,
+            itemId: startedItem.id,
+            delta: "lifecycle complete.",
+          },
+        });
+      }
+      const completedItem = { ...startedItem, text: completedText };
+      await writeJson({
+        method: "item/completed",
+        params: {
+          item: completedItem,
+          threadId,
+          turnId: activeTurn.id,
+          completedAtMs: 2,
+        },
+      });
+      const terminalStatus = mode === "lifecycle-failed-turn"
+        ? "failed"
+        : "completed";
+      await writeJson({
+        method: "turn/completed",
+        params: {
+          threadId,
+          turn: {
+            ...lifecycleTurn(terminalStatus),
+            items: [completedItem],
+          },
+        },
+      });
       continue;
     }
   }
