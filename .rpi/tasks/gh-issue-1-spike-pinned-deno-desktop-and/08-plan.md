@@ -15,12 +15,16 @@ Codex CLI `0.145.0` pair. The work starts by making the generated stable protoco
 reproducible, proves JSONL transport and lifecycle policy with deterministic child processes, then
 integrates one authenticated turn and publishes a cross-hashed proof set.
 
-The compatibility claim is deliberately fail-closed. Process-group signaling and post-shutdown
-process snapshots may establish that no observed descendants remain, but they must never establish
-that an immediately escaping descendant was contained. Phases 5 and 6 remain dependency-blocked
-until Phase 4 supplies a race-closing containment or event-tracking implementation that passes the
-real immediate-`setsid` fixture and can truthfully produce
-`escapedDescendantContainmentProven: true`.
+The MVP compatibility claim is deliberately scoped to the actual pinned Codex CLI `0.145.0`
+app-server process tree observed during the real compatibility run. Acceptance requires bounded
+shutdown with the direct child exited, stdout/stderr drains settled, every observed descendant and
+owned process-group member absent, and `noObservedDescendantsRemain: true`. Process-group signaling
+and post-shutdown snapshots must never be presented as proof that an arbitrary descendant which
+immediately calls `setsid()` was contained. The adversarial fixture remains an explicit
+unsupported, fail-closed limitation: it must retain leak/tracker diagnostics and
+`escapedDescendantContainmentProven: false`, but that false proof flag no longer blocks Phase 4,
+Phase 5, Phase 6, or MVP acceptance when the actual pinned Codex run satisfies the observed-tree
+shutdown gate.
 
 ## Current State Analysis
 
@@ -53,7 +57,10 @@ transcribe.
   coverage manifest is complete over the generated stable surface**, **Transcript validation
   proves transport order and semantic lifecycle separately**, and **The summary
   cryptographically binds versions, protocol evidence, and observations** are normative for
-  coverage, retained-record, and summary contracts.
+  coverage, retained-record, and summary contracts except for the cleanup acceptance criterion
+  superseded by the user-approved MVP decision in this plan: `noObservedDescendantsRemain` is the
+  required true acceptance gate, while `escapedDescendantContainmentProven` remains a separately
+  required evidence fact that may be false and may never be set true without race-closing proof.
 - The red-team revision requires immutable compatibility inputs, bidirectional journal-derived
   coverage, draft-07 validation with explicit Codex numeric formats, register-before-write
   correlation, complete-frame indexing before validation, bounded model pagination, and a
@@ -77,14 +84,16 @@ transcribe.
   native thread/turn/item continuity, raw-before-redaction validation, schema-preserving retained
   evidence, journal-derived coverage, and every shutdown entry path.
 - macOS arm64 shutdown separately records `noObservedDescendantsRemain` and
-  `escapedDescendantContainmentProven`; the latter is true only after continuously covered lineage
-  tracking contains an immediate session-escaping descendant.
+  `escapedDescendantContainmentProven`. The actual pinned Codex run must make the first true after
+  bounded shutdown; the second remains false unless continuously covered lineage tracking really
+  contains an immediate session-escaping descendant.
 - One explicit authenticated run completes the required initialize, catalog, thread, turn,
   streaming, and terminal lifecycle in a disposable Git repository without changing committed
   evidence.
 - Acceptance stages and validates run-derived coverage, a redacted bidirectional journal, and a
-  summary as one cross-hashed proof set. Any stale, partial, mismatched, or false-gate set derives
-  candidate status.
+  summary as one cross-hashed proof set. Any stale, partial, mismatched, or false
+  acceptance-required gate derives candidate status; an accurately false
+  `escapedDescendantContainmentProven` limitation does not.
 
 ## Validation Environment
 
@@ -95,7 +104,7 @@ transcribe.
 - **Preflight checks**: Confirm the intended repository revision; run `deno --version`,
   `codex --version`, and `git --version`; require the exact manifest-selected Deno and Codex
   versions; run `deno task protocol:verify`; and, before live work, verify the selected account is
-  non-null and Phase 4's containment proof capability is available.
+  non-null and Phase 4's revised observed-tree shutdown boundary has passed.
 - **Migration/setup policy**: No database, service, authentication, or account migration is
   permitted. `deno task protocol:generate` may regenerate only through the exact pinned Codex CLI
   in stable mode, into temporary output before deterministic compare or replacement. Tests may
@@ -108,9 +117,10 @@ transcribe.
   generations is not itself a blocker because Codex CLI `0.145.0` emits nondeterministic object
   order in `json-schema/codex_app_server_protocol.v2.schemas.json`. Live compatibility is blocked
   by missing or mismatched Codex, `account: null`, the wrong platform, a live protocol failure,
-  stale hashes, a remaining process, or inability to prove immediate escaped-descendant
-  containment. Snapshot polling alone is an explicit containment blocker even when it observes an
-  empty process table.
+  stale hashes, unsafe or incomplete shutdown evidence, or any direct child, observed descendant,
+  or owned process-group member remaining after the actual pinned run. Tracker unavailability and
+  `escapedDescendantContainmentProven: false` remain recorded limitations but are not MVP blockers
+  when the pinned run has `noObservedDescendantsRemain: true`.
 
 ### Fact-check baseline
 
@@ -126,7 +136,7 @@ transcribe.
   contract below, and run every permission-scoped gate; static checking alone cannot complete it.
 - The available preflight evidence is `codex-cli 0.145.0`, Git `2.50.1`, and Darwin arm64. Live
   tasks remain separately blocked until the caller supplies an already-authenticated selected
-  `CODEX_HOME` and Phase 4 has proved the real escaped-descendant containment capability.
+  `CODEX_HOME` and the revised Phase 4 observed-tree shutdown gate passes.
 - A blocked Phase 1 attempt provisioned exact temporary Deno `2.9.3` and generated three clean
   stable outputs with Codex CLI `0.145.0`. Each contained 617 TypeScript and 273 JSON Schema files.
   Whole-tree raw hashes differed, `diff -qr` isolated every byte difference to
@@ -167,9 +177,10 @@ Build the proof in dependency order, using deterministic integration tests befor
 1. Establish immutable pins, generated inputs, draft-07 validation, and complete stable-surface
    classification.
 2. Prove the child-process and JSONL transport boundary over actual pipes.
-3. Build lifecycle/evidence policy and shutdown/containment in parallel only after the shared
+3. Build lifecycle/evidence policy and bounded shutdown in parallel only after the shared
    transport interfaces are fixed; the two phases have disjoint ownership.
-4. Compose a verify-only authenticated run only when the absolute cleanup gate is provable.
+4. Compose a verify-only authenticated run after Phase 4 proves bounded observed-tree cleanup and
+   preserves the adversarial escape as an explicit unsupported limitation.
 5. Publish the run-derived proof set through the explicit acceptance path and re-derive candidate
    versus validated status from disk.
 
@@ -183,7 +194,7 @@ the compatibility manifest and must not be introduced ad hoc in implementation o
 - [x] Phase 1: Establish the immutable compatibility and generated-protocol contract
 - [x] Phase 2: Prove bounded bidirectional JSONL transport over a real child process
 - [x] Phase 3: Prove preflight, lifecycle, transcript, and coverage behavior offline
-- [ ] Phase 4: Prove bounded shutdown and escaped-descendant containment fail-closed
+- [ ] Phase 4: Prove bounded observed-tree shutdown and preserve escaped-descendant diagnostics
 - [ ] Phase 5: Complete the authenticated compatibility run in verify-only mode
 - [ ] Phase 6: Publish and re-verify one atomic acceptance proof set
 
@@ -708,20 +719,22 @@ fake-child runtime behavior so every outcome is automated and credential-free.
 
 ---
 
-## Phase 4: Prove bounded shutdown and escaped-descendant containment fail-closed
+## Phase 4: Prove bounded observed-tree shutdown and preserve escape diagnostics
 
 ### Overview
 
 Implement one memoized shutdown state machine for every process exit path, plus the macOS arm64
-process-group and lineage boundary. Snapshot observations and absolute containment remain separate:
-this phase cannot complete unless a race-closing tracker continuously covers descendant creation
-through final shutdown, contains a child that immediately calls `setsid` or is reparented, and
-truthfully sets `escapedDescendantContainmentProven`.
+process-group and observed-lineage boundary. This phase completes when ordinary graceful,
+`SIGTERM`, and `SIGKILL` paths are deadline-bounded; direct status and both drains settle; unsafe
+identity, timeout, and remaining-process states fail; ordinary descendants are removed; and the
+final observation yields `noObservedDescendantsRemain: true`.
 
-If the available macOS/Deno environment cannot provide that proof, the correct phase result is a
-typed containment blocker with the compatibility pair still a candidate. Process-group cleanup,
-direct-child exit, and `noObservedDescendantsRemain: true` are useful evidence but are not a
-substitute completion path.
+Snapshot observations and absolute containment remain separate. The real immediate-`setsid`/
+reparent fixture stays a cleanup-safe negative limitation test: it must surface `DESCENDANT_LEAK`
+plus tracker/containment diagnostics and keep `escapedDescendantContainmentProven: false`. Passing
+that expected negative test does not prove containment and does not block Phase 4 completion.
+`TRACKER_UNAVAILABLE` and `CONTAINMENT_UNPROVEN` are retained limitation diagnostics rather than
+selected fatal failures when the supported observed-tree shutdown path itself succeeds.
 
 ### Dependencies and Parallelism
 
@@ -730,14 +743,44 @@ substitute completion path.
 - **Parallel ownership boundary**: This phase exclusively owns `src/shutdown.ts`,
   `src/process_tree_darwin.ts`, shutdown integration in `src/process_host.ts`, shutdown diagnostics
   in `src/diagnostics.ts`, shutdown-only modes in `tests/fixtures/fake_app_server.ts`, and
-  `tests/shutdown_test.ts`. Phase 3 owns preflight, lifecycle, transcript semantics, evidence
-  schemas, and coverage. Both consume the fixed Phase 2 host/client contracts.
+  `tests/shutdown_test.ts`. It also owns only the cleanup-acceptance amendment in
+  `schemas/evidence.schema.json` and its focused assertions in `tests/transcript_test.ts`; completed
+  Phase 3 lifecycle, redaction, and coverage behavior remains unchanged. Both phases consume the
+  fixed Phase 2 host/client contracts.
 - **Execution note**: Concurrent phase runs require isolated worktrees and a parent-owned
   integration strategy.
 
 ### Changes Required
 
-#### 4.1 Memoized bounded shutdown controller
+#### 4.1 Revised cleanup evidence contract
+
+**Files**:
+
+- `spikes/codex-app-server/schemas/evidence.schema.json`
+- `spikes/codex-app-server/tests/transcript_test.ts`
+
+**Changes**:
+
+- Preserve both required shutdown facts. An accepted MVP summary requires
+  `noObservedDescendantsRemain: true`; `escapedDescendantContainmentProven` is a required boolean
+  evidence fact but is not part of the all-true acceptance-gate set.
+- Expand `AcceptanceSummary.shutdown` to retain the implemented structured shutdown evidence:
+  owned root/group/session identity, observed PIDs and lineage events, signal path and timed-out
+  stages, recorded direct exit, completed stdout/stderr drains, bounded timings, `remainingPids`,
+  containment-capability evidence, both cleanup facts, and bounded diagnostics. Accepted evidence
+  requires a recorded direct exit, both drains complete, `remainingPids: []`, and
+  `noObservedDescendantsRemain: true`.
+- Remove `escapedDescendantContainmentProven` from `AcceptanceSummary.gates`. Keep it under
+  structured shutdown evidence, false for snapshot-only operation. If any future implementation
+  supplies true, require capability fields proving pre-exec arming, continuous creation/session/
+  reparent coverage without loss or overflow, and final absence of every tracked PID; snapshots,
+  sampling frequency, and group-signal success can never set it.
+- Test that `noObservedDescendantsRemain: true` plus
+  `escapedDescendantContainmentProven: false` is schema-valid and eligible for later MVP
+  acceptance. Reject a missing proof fact, a false `noObservedDescendantsRemain`, a remaining PID,
+  or a true proof claim without the separately validated proof evidence.
+
+#### 4.2 Memoized bounded shutdown controller
 
 **File**: `spikes/codex-app-server/src/shutdown.ts`
 
@@ -755,10 +798,12 @@ substitute completion path.
 - Return structured evidence containing root/session identity, descendants observed, signal path,
   direct exit, timings, remaining PIDs, `noObservedDescendantsRemain`, containment capability
   evidence, and `escapedDescendantContainmentProven`.
-- Make timeout, unsafe root/group identity, remaining process, and unproven containment typed
-  failures. No error path may skip the cleanup attempt or overwrite stronger prior evidence.
+- Make timeout, unsafe root/group identity, failed direct exit/drains, and any remaining process
+  typed failures. Preserve tracker-unavailable and containment-unproven diagnostics without
+  selecting them as fatal when bounded observed cleanup succeeds. No error path may skip the
+  cleanup attempt or overwrite stronger prior evidence.
 
-#### 4.2 Darwin process-group and lineage boundary
+#### 4.3 Darwin process-group and observed-lineage boundary
 
 **File**: `spikes/codex-app-server/src/process_tree_darwin.ts`
 
@@ -770,26 +815,29 @@ substitute completion path.
 - Implement snapshot inspection only as observational evidence. An empty final snapshot may set
   `noObservedDescendantsRemain` when all observed PIDs and group members are absent, but this path
   must always leave `escapedDescendantContainmentProven` false.
-- Put any proof-producing path behind a capability that is armed before child code can execute and
-  continuously covers process creation, session/group escape, reparenting, and exit through final
-  verification without gaps or overflow. The proof flag may be true only when that capability
-  accounts for every lineage event and terminates every tracked descendant.
-- Fail closed when the platform facility is unavailable, loses events, starts after child
-  execution, overflows, cannot link a reparented process to the root, or cannot terminate an escaped
-  PID. Do not infer proof from sampling frequency, repeated empty snapshots, the direct child's
+- Record tracker unavailability, loss, late start, overflow, unlinked reparenting, or inability to
+  terminate an escaped PID as containment-limitation evidence and keep the proof flag false. Those
+  states remain fatal for any absolute-containment claim, but tracker unavailability alone is not
+  fatal to the scoped observed-tree MVP gate.
+- Put any future proof-producing path behind a capability armed before child code can execute and
+  continuously covering process creation, session/group escape, reparenting, and exit through
+  final verification without gaps or overflow. The proof flag may be true only when that
+  capability accounts for every lineage event and terminates every tracked descendant.
+- Do not infer proof from sampling frequency, repeated empty snapshots, the direct child's
   cooperation, or successful group signals.
 - Guard `Deno.kill` negative-PID operations by re-reading and matching the owned positive root,
   session, and process-group identity immediately before each signal.
 
-#### 4.3 Spawn-to-shutdown integration
+#### 4.4 Spawn-to-shutdown integration
 
 **File**: `spikes/codex-app-server/src/process_host.ts`
 
 **Changes**:
 
-- Create an owned session/process group and arm the proof-producing lineage capability before
-  allowing child work to cross the observation boundary. If the host cannot establish that
-  ordering, expose containment as unavailable and block Phase 4 completion.
+- Create an owned session/process group, capture the root/group identity, and begin observation
+  before allowing the child work to proceed through the host boundary. If no race-closing tracker
+  exists, expose containment as unavailable, keep the proof flag false, and continue only with the
+  scoped observed-tree cleanup contract.
 - Wire the direct status and both drain promises into the memoized shutdown controller.
 - Route normal completion, spawn-after-start failure, protocol/schema failure, request timeout,
   cancellation, unexpected request, stream failure, and unexpected child exit through the same
@@ -797,7 +845,7 @@ substitute completion path.
 - Keep platform inspection/signaling in the Darwin boundary; the generic process host must not
   parse process-table output or claim descendant proof.
 
-#### 4.4 Shutdown diagnostics
+#### 4.5 Shutdown diagnostics
 
 **File**: `spikes/codex-app-server/src/diagnostics.ts`
 
@@ -807,10 +855,11 @@ substitute completion path.
   `DESCENDANT_LEAK`, tracker unavailable/lost/overflowed, and containment unproven.
 - Include shutdown stage, verified root/group identity, observed and remaining PIDs, and signal
   path. Keep snapshot evidence and proof-capability evidence separately labeled.
-- Ensure human-facing recovery text states that the compatibility claim remains blocked whenever
-  escaped-descendant containment is unproven.
+- Ensure human-facing text distinguishes fatal observed-tree cleanup failures from the unsupported
+  absolute-containment limitation. It must not claim escaped-descendant containment when proof is
+  unavailable, but it must not report that limitation alone as an MVP compatibility failure.
 
-#### 4.5 Adversarial shutdown fixture modes
+#### 4.6 Adversarial shutdown fixture modes
 
 **File**: `spikes/codex-app-server/tests/fixtures/fake_app_server.ts`
 
@@ -824,7 +873,7 @@ substitute completion path.
 - Give each fixture a cleanup-safe control path for a failing test harness so a negative test cannot
   intentionally leave a process behind.
 
-#### 4.6 Shutdown and absolute-gate tests
+#### 4.7 Shutdown and limitation tests
 
 **File**: `spikes/codex-app-server/tests/shutdown_test.ts`
 
@@ -835,11 +884,15 @@ substitute completion path.
   failure.
 - Assert snapshot-only inspection can set at most `noObservedDescendantsRemain: true` and always
   leaves `escapedDescendantContainmentProven: false`.
-- Run the immediate-`setsid`/reparent fixture through the actual proof-producing platform boundary,
-  not a mocked boolean. Require continuous lineage evidence, termination of the escaped PID, no
-  tracker loss/overflow, and final absence before the proof flag may be true.
-- Assert any escape, untracked lineage event, unavailable facility, lost/overflowed stream,
-  remaining PID, or unverifiable signal target fails the phase and keeps the pair a candidate.
+- Run the immediate-`setsid`/reparent fixture through the actual platform boundary, not a mocked
+  boolean. Require it to demonstrate the unsupported escape, produce `DESCENDANT_LEAK` and
+  tracker/containment diagnostics, leave the proof flag false, and use its cleanup-safe control
+  path so the test itself leaves no process behind. Treat this expected negative result as a
+  passing limitation test, not a Phase 4 blocker.
+- Assert a remaining PID or unverifiable signal target is fatal for that shutdown attempt.
+  Unavailable/lost/overflowed tracking keeps the proof flag false and prevents any absolute claim
+  but does not fail a different ordinary shutdown attempt whose bounded final observed set is
+  empty.
 - Prove protocol failure, timeout, unexpected request, child exit, and cancellation all return the
   same memoized shutdown evidence rather than independent cleanup attempts.
 
@@ -852,18 +905,20 @@ substitute completion path.
   direct child or observed descendant.
 - [ ] Snapshot-only testing yields `escapedDescendantContainmentProven: false` even when
   `noObservedDescendantsRemain: true`.
-- [ ] The immediate-`setsid`/reparent fixture is continuously tracked and terminated by the real
-  race-closing capability before `escapedDescendantContainmentProven: true` is accepted.
-- [ ] Disabling, delaying, overflowing, or losing the lineage capability produces a typed blocker,
-  leaves the proof flag false, and prevents Phase 4 completion.
+- [ ] The immediate-`setsid`/reparent fixture produces `DESCENDANT_LEAK` plus tracker/containment
+  diagnostics, leaves `escapedDescendantContainmentProven: false`, and is removed by the
+  cleanup-safe harness without being misreported as contained.
+- [ ] Disabling, delaying, overflowing, or losing the lineage capability leaves the proof flag
+  false and prevents an absolute-containment claim without blocking an otherwise clean
+  observed-tree result.
 - [ ] Every success/failure/cancellation entry path shares one close promise, waits for status and
   drains, and records the same evidence object for concurrent callers.
 
 #### Runtime Verification
 
-None required — shutdown, including the adversarial escaped-descendant case, must be a repeatable
-automated macOS arm64 integration test. Manual process-table observation cannot complete this
-phase.
+None required — shutdown, including the adversarial escaped-descendant limitation case, must be a
+repeatable automated macOS arm64 integration test. Manual process-table observation cannot
+complete this phase. The real pinned Codex observed-tree gate is exercised in Phase 5.
 
 ---
 
@@ -872,7 +927,7 @@ phase.
 ### Overview
 
 Compose the exact artifacts, preflight, lifecycle, transcript, coverage evaluator, measurements,
-and proven shutdown boundary into the user-invoked harness. Run one real authenticated turn and
+and revised bounded shutdown boundary into the user-invoked harness. Run one real authenticated turn and
 produce candidate evidence in memory/temporary storage only. This phase proves the live boundary
 without changing committed coverage or evidence.
 
@@ -881,7 +936,8 @@ without changing committed coverage or evidence.
 - **Depends on**: Phase 3 and Phase 4
 - **Can run in parallel with**: None
 - **Parallel ownership boundary**: Not applicable. This integrated phase consumes every earlier
-  contract, and it may not begin while escaped-descendant containment is unavailable or unproven.
+  contract. It may begin after the freshly retried Phase 4 passes its revised bounded
+  observed-tree gate; unavailable absolute containment is not a dependency blocker.
 - **Execution note**: Concurrent phase runs require isolated worktrees and a parent-owned
   integration strategy.
 
@@ -889,9 +945,20 @@ without changing committed coverage or evidence.
 
 #### 5.1 Verify-only CLI composition
 
-**File**: `spikes/codex-app-server/src/main.ts`
+**Files**:
+
+- `deno.json`
+- `spikes/codex-app-server/src/main.ts`
 
 **Changes**:
+
+- Extend both live tasks with the already-implemented bounded shutdown executables while preserving
+  their existing read/write scopes:
+
+  ```json
+  "spike:verify": "deno run --allow-read=.,/tmp --allow-write=/tmp --allow-run=/opt/homebrew/bin/codex,/usr/bin/git,/usr/bin/python3,/bin/ps,/bin/kill spikes/codex-app-server/src/main.ts verify",
+  "spike:accept": "deno run --allow-read=.,/tmp --allow-write=spikes/codex-app-server/evidence,spikes/codex-app-server/coverage.json,/tmp --allow-run=/opt/homebrew/bin/codex,/usr/bin/git,/usr/bin/python3,/bin/ps,/bin/kill spikes/codex-app-server/src/main.ts accept"
+  ```
 
 - Compose compatibility loading, generated-bundle verification, platform/version preflight,
   disposable repository creation, process/session startup, lifecycle execution, shutdown,
@@ -901,7 +968,8 @@ without changing committed coverage or evidence.
 - Enforce one `finally` cleanup path for raw memory/temp capture, temporary repository, temporary
   candidate evidence, protocol session, and process tracker.
 - Return non-zero with the typed blocker for exact-version, artifact, platform, auth, protocol,
-  lifecycle, redaction, shutdown, containment, or cleanup failure.
+  lifecycle, redaction, observed-tree shutdown, or cleanup failure. Tracker unavailability or a
+  false escaped-containment proof flag alone is a retained limitation, not a live-task blocker.
 
 #### 5.2 Real pinned lifecycle and measurements
 
@@ -931,9 +999,10 @@ without changing committed coverage or evidence.
   prompt/response text, account identifiers, and home/repository paths before declaring the
   candidate eligible.
 - Require exact versions, current generated hash, complete run-derived coverage, ordered lifecycle,
-  authenticated completion, `noObservedDescendantsRemain`, and
-  `escapedDescendantContainmentProven` all true. A false or absent gate is a blocker, never a
-  warning.
+  authenticated completion, settled direct status and drains, empty `remainingPids`, and
+  `noObservedDescendantsRemain: true`. Preserve `escapedDescendantContainmentProven` as a required
+  shutdown evidence fact; false is the expected snapshot-only MVP value and is not a blocker.
+  Reject it if absent or if it is true without separately validated race-closing proof.
 
 #### 5.4 Explicit authenticated integration test
 
@@ -946,7 +1015,9 @@ without changing committed coverage or evidence.
   repository's named live-test environment contract rather than running in deterministic CI.
 - Assert native identity/order, non-empty completed agent content, generated-schema validity before
   and after redaction, all measurements present, bounded stderr separation, complete coverage, and
-  both shutdown gates.
+  clean bounded observed-tree shutdown of the actual Codex CLI `0.145.0` app-server process tree.
+  Require `noObservedDescendantsRemain: true` and an accurate
+  `escapedDescendantContainmentProven` fact; do not require the latter to be true.
 - Do not assert exact assistant prose or the presence of optional notifications.
 - Capture enough failure diagnostics to identify the blocking gate without retaining raw sensitive
   payloads.
@@ -964,8 +1035,10 @@ without changing committed coverage or evidence.
 - [ ] The candidate contains no credential, raw prompt/response, direct account identifier, home
   path, or repository path.
 - [ ] Exact versions, generated artifacts, coverage completeness, lifecycle, authentication,
-  no-observed-descendants, and escaped-descendant containment are all true before verify-only
-  reports success.
+  settled direct status/drains, empty `remainingPids`, and
+  `noObservedDescendantsRemain: true` are all satisfied before verify-only reports success.
+- [ ] `escapedDescendantContainmentProven` remains present and false unless separately validated
+  race-closing proof exists; its accurate false value does not fail the pinned-run verification.
 - [ ] A hash of each committed coverage/evidence path before and after `deno task spike:verify`
   remains identical.
 
@@ -1007,7 +1080,8 @@ but that state must derive candidate status until all three artifacts and immuta
 
 - Serialize the complete generated-surface coverage in stable key order with a final newline,
   generated bundle binding, journal-derived counts, and dispositions consistent with those counts.
-- Replace the zero-observation baseline only from `spike:accept` after all live gates pass.
+- Replace the zero-observation baseline only from `spike:accept` after all acceptance-required live
+  gates pass.
   Verification and ordinary test paths remain read-only.
 
 #### 6.2 Canonical retained journal
@@ -1038,16 +1112,25 @@ but that state must derive candidate status until all three artifacts and immuta
   on the same filesystem.
 - Build the normative TDD `AcceptanceSummary`: exact versions/platform, current compatibility and
   generated hashes, staged coverage/transcript hashes, lifecycle counts/IDs, required
-  measurements, structured shutdown evidence, terminal completed status, and every true gate.
+  measurements, structured shutdown evidence, terminal completed status, and the revised
+  acceptance-required gates. The required true gate set is exactly `exactVersions`,
+  `generatedArtifactsMatch`, `coverageComplete`, `everyRetainedEnvelopeSchemaValid`,
+  `lifecycleOrdered`, `authenticatedTurnCompleted`, and `noObservedDescendantsRemain`.
+  `escapedDescendantContainmentProven` remains a required field in shutdown evidence, outside that
+  all-true set.
 - Validate compatibility/generated inputs again immediately before publication. Validate staged
-  coverage, transcript, summary, cross-hashes, canonical bytes, sensitive-data scan, and all gates
-  as one set.
+  coverage, transcript, summary, cross-hashes, canonical bytes, sensitive-data scan, and every
+  acceptance-required gate as one set. Require direct child exit, completed drains, empty
+  `remainingPids`, and `noObservedDescendantsRemain: true`; accept an accurate false
+  `escapedDescendantContainmentProven`, but reject a missing fact or a true value without validated
+  race-closing proof.
 - Replace only the three fixed run-derived outputs. Immutable compatibility and generated inputs
   remain untouched. Use same-filesystem replacement for each output and retain no success marker
   outside the cross-hashed summary.
 - On startup and after publication, derive validated status only when the entire on-disk set agrees.
-  Missing, stale, singly replaced, partially replaced, malformed, false-gate, or mismatched
-  artifacts derive candidate status.
+  Missing, stale, singly replaced, partially replaced, malformed, false acceptance-required gate,
+  remaining observed PID, unsupported proof claim, or mismatched artifacts derive candidate
+  status.
 
 #### 6.4 Proof-set rejection tests
 
@@ -1057,12 +1140,16 @@ but that state must derive candidate status until all three artifacts and immuta
 
 - Add temporary proof-set cases for a missing member, one replaced member, changed immutable
   manifest, changed generated byte, stale coverage, stale transcript, wrong hash, false/absent
-  acceptance gate, non-canonical bytes, and interrupted replacement at each fixed output.
+  acceptance-required gate, missing shutdown fact, remaining observed PID,
+  `escapedDescendantContainmentProven: true` without proof evidence, non-canonical bytes, and
+  interrupted replacement at each fixed output.
 - Assert every partial/mismatched case derives candidate status and cannot be interpreted as a
   validated pair.
 - Prove successful staged and published sets recalculate to the same hashes, preserve complete
   stable-surface membership, remain schema-valid after redaction, contain a completed turn, and
-  contain both true shutdown gates.
+  contain clean bounded observed-tree shutdown. Explicitly prove that
+  `noObservedDescendantsRemain: true` with `escapedDescendantContainmentProven: false` remains
+  eligible, while neither an absent proof fact nor an unsupported true proof claim is eligible.
 
 ### Success Criteria
 
@@ -1074,10 +1161,14 @@ but that state must derive candidate status until all three artifacts and immuta
 - [ ] Recalculate compatibility, generated-bundle, coverage, and transcript hashes from disk and
   verify exact equality with the published summary.
 - [ ] Removing or replacing any single proof artifact, changing any immutable input, flipping any
-  gate, or simulating each interrupted replacement derives candidate rather than validated status.
+  acceptance-required gate, or simulating each interrupted replacement derives candidate rather
+  than validated status.
 - [ ] The committed journal validates after redaction, coverage equals the complete generated
-  stable surface and journal observations, the terminal turn is completed, and both
-  `noObservedDescendantsRemain` and `escapedDescendantContainmentProven` are true.
+  stable surface and journal observations, the terminal turn is completed, direct status and
+  drains are complete, `remainingPids` is empty, and `noObservedDescendantsRemain` is true.
+- [ ] The published summary retains `escapedDescendantContainmentProven`; false is accepted and
+  accurately documents the unsupported immediate-`setsid` limitation, while true is rejected
+  unless validated race-closing proof accompanies it.
 - [ ] Re-running `deno task protocol:verify` after publication performs no writes and re-verifies
   the generated bundle plus current complete coverage membership. Complete on-disk proof-set
   revalidation remains part of `spike:accept` and its acceptance evaluator.
@@ -1105,12 +1196,18 @@ post-publication revalidation as one automated gate.
   two-hash contract supersedes those raw-only regeneration statements; the supervisor should align
   all four upstream artifacts before any later workflow treats their wording as independently
   normative.
-- The supplied evidence does not identify a proven macOS arm64 facility that closes the
-  fork/`setsid`/reparent race. Phase 4 must implement and test continuously covering containment or
-  event tracking, or remain incomplete with `escapedDescendantContainmentProven: false`. Snapshot
-  polling and process-group signaling alone cannot satisfy the gate.
+- **User-approved MVP descoping**: the ticket, revised design discussion, revised TDD, red-team
+  disposition, and historical Phase 4 ledger encode absolute containment of arbitrary descendants
+  more strongly than the revised acceptance criterion. For this plan, bounded clean shutdown of the
+  actual pinned Codex CLI `0.145.0` app-server process tree observed during the live run supersedes
+  that absolute wording. The immediate-`setsid`/reparent fixture remains implemented, diagnosed,
+  cleanup-safe, and explicitly unsupported; it must keep
+  `escapedDescendantContainmentProven: false` and must never be cited as proven containment, but it
+  no longer blocks Phases 4–6 when their revised observed-tree gates pass. No upstream artifact is
+  edited by this fact-check.
 - The selected pair remains a candidate until Phases 5 and 6 complete with an already-authenticated
-  selected `CODEX_HOME`, the exact platform and versions, and every cross-hashed gate true.
+  selected `CODEX_HOME`, the exact platform and versions, every acceptance-required gate true, and
+  an accurate separately retained escaped-containment proof fact.
 - Startup, first-event, completion, and shutdown observations remain unknown until the live run.
   Record them under manifest safety bounds without inventing performance thresholds.
 - Optional live notifications remain data-dependent. Derive them from the accepted journal and do
