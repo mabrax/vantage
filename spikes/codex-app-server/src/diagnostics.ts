@@ -19,7 +19,17 @@ export type TransportDiagnosticCode =
   | "INITIALIZATION_REQUIRED"
   | "CLIENT_CLOSED"
   | "EOF_WITH_PENDING"
-  | "CLOSE_FAILED";
+  | "CLOSE_FAILED"
+  | "PLATFORM_UNSUPPORTED"
+  | "UNSAFE_PROCESS_GROUP"
+  | "GRACEFUL_SHUTDOWN_TIMEOUT"
+  | "TERMINATE_TIMEOUT"
+  | "FORCE_TIMEOUT"
+  | "DESCENDANT_LEAK"
+  | "TRACKER_UNAVAILABLE"
+  | "TRACKER_LOST"
+  | "TRACKER_OVERFLOWED"
+  | "CONTAINMENT_UNPROVEN";
 
 export type DiagnosticPlatform = {
   os: string;
@@ -191,6 +201,23 @@ function defaultMessage(code: TransportDiagnosticCode): string {
     CLIENT_CLOSED: "the JSONL client is already closed",
     EOF_WITH_PENDING: "stdout ended while requests were still pending",
     CLOSE_FAILED: "the child process did not close cleanly",
+    PLATFORM_UNSUPPORTED:
+      "the shutdown boundary is unavailable on this platform",
+    UNSAFE_PROCESS_GROUP:
+      "the owned process-group identity could not be verified safely",
+    GRACEFUL_SHUTDOWN_TIMEOUT:
+      "the child did not exit within the graceful shutdown bound",
+    TERMINATE_TIMEOUT:
+      "the process group did not exit within the terminate bound",
+    FORCE_TIMEOUT:
+      "the process group did not exit within the force-termination bound",
+    DESCENDANT_LEAK:
+      "one or more observed descendant processes remain after shutdown",
+    TRACKER_UNAVAILABLE: "a race-closing descendant tracker is unavailable",
+    TRACKER_LOST: "the descendant tracker lost lineage events",
+    TRACKER_OVERFLOWED:
+      "the descendant tracker overflowed before shutdown completed",
+    CONTAINMENT_UNPROVEN: "escaped-descendant containment could not be proven",
   };
   return messages[code];
 }

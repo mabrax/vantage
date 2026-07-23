@@ -2,17 +2,9 @@ const mode = Deno.args[0] ?? "normal";
 const modeValue = Number(Deno.args[1] ?? "0");
 const encoder = new TextEncoder();
 
-// Phase 4 owns these semantics. Reserving their names here prevents Phase 2
-// scenarios from accidentally assigning weaker behavior to shutdown modes.
-const PHASE_4_RESERVED_MODES = new Set([
-  "ignore-stdin-close",
-  "ignore-signals",
-  "ordinary-grandchild",
-  "surviving-grandchild",
-  "immediate-session-escape",
-]);
-if (PHASE_4_RESERVED_MODES.has(mode)) {
-  throw new Error(`fixture mode ${mode} is reserved for Phase 4`);
+if (mode === "shutdown-worker") {
+  await boundedHold(modeValue);
+  Deno.exit(0);
 }
 
 const initializeResult = {
@@ -180,9 +172,82 @@ async function floodStderr(byteCount: number): Promise<void> {
   }
 }
 
+type ShutdownDescendant = {
+  pid: number;
+  kind: "ordinary" | "surviving" | "escaped";
+};
+
+function startShutdownDescendant(
+  selectedMode: string,
+): ShutdownDescendant | undefined {
+  const fixturePath = decodeURIComponent(new URL(import.meta.url).pathname);
+  if (
+    selectedMode === "ordinary-grandchild" ||
+    selectedMode === "surviving-grandchild"
+  ) {
+    const child = new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--quiet",
+        fixturePath,
+        "shutdown-worker",
+        String(modeValue),
+      ],
+      stdin: "null",
+      stdout: "null",
+      stderr: "null",
+    }).spawn();
+    if (selectedMode === "surviving-grandchild") child.unref();
+    return {
+      pid: child.pid,
+      kind: selectedMode === "ordinary-grandchild" ? "ordinary" : "surviving",
+    };
+  }
+  if (selectedMode === "immediate-session-escape") {
+    const escapeLauncher = [
+      "import os,sys",
+      "os.setsid()",
+      "os.execve(sys.argv[1], [sys.argv[1], *sys.argv[2:]], dict(os.environ))",
+    ].join(";");
+    // setsid is the first operation in the escape launcher. The marker below
+    // is emitted by the direct parent after spawn and does not gate the escape.
+    const child = new Deno.Command("/usr/bin/python3", {
+      args: [
+        "-c",
+        escapeLauncher,
+        Deno.execPath(),
+        "run",
+        "--quiet",
+        fixturePath,
+        "shutdown-worker",
+        String(modeValue),
+      ],
+      stdin: "null",
+      stdout: "null",
+      stderr: "null",
+    }).spawn();
+    return { pid: child.pid, kind: "escaped" };
+  }
+  return undefined;
+}
+
+async function boundedHold(durationMs: number): Promise<void> {
+  if (!Number.isSafeInteger(durationMs) || durationMs <= 0) {
+    throw new TypeError("shutdown fixture duration must be positive");
+  }
+  await new Promise((resolve) => setTimeout(resolve, durationMs));
+}
+
 async function main(): Promise<void> {
   let stderrTask: Promise<void> | undefined;
   const delayedRequests: Record<string, unknown>[] = [];
+  if (mode === "ignore-signals") {
+    Deno.addSignalListener("SIGTERM", () => {});
+  }
+  const shutdownDescendant = startShutdownDescendant(mode);
+  if (shutdownDescendant) {
+    await writeJson({ fixture: "shutdown-descendant", ...shutdownDescendant });
+  }
   if (mode === "preinit-notification") {
     await writeJson(changedNotification);
   }
@@ -370,6 +435,15 @@ async function main(): Promise<void> {
     }
   }
   await stderrTask;
+  if (
+    mode === "ignore-stdin-close" ||
+    mode === "ignore-signals" ||
+    mode === "ordinary-grandchild"
+  ) {
+    // A manifest-derived duration gives a cleanup-safe fallback even when the
+    // test harness fails before delivering its expected signal.
+    await boundedHold(modeValue);
+  }
 }
 
 await main();
