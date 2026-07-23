@@ -1,9 +1,18 @@
 import {
   deriveCoverageFromJournal,
   extractStableSurface,
+  serializeCoverage,
   validateCoverageMembership,
 } from "./coverage.ts";
-import { ContractError } from "./config.ts";
+import {
+  canonicalJsonBytes,
+  ContractError,
+  type CoverageManifest,
+  hashCanonicalJson,
+  loadConfiguration,
+  parseJsonRejectDuplicateKeys,
+  sha256Hex,
+} from "./config.ts";
 import { TransportError } from "./diagnostics.ts";
 import { verifyProtocol } from "./generate_protocol.ts";
 import {
@@ -18,7 +27,10 @@ import {
   type DarwinProcessRecord,
   readDarwinProcessSnapshot,
 } from "./process_tree_darwin.ts";
-import { ProtocolValidator } from "./protocol_validation.ts";
+import {
+  ProtocolValidator,
+  validateJsonAgainstSchema,
+} from "./protocol_validation.ts";
 import {
   type ShutdownBounds,
   ShutdownError,
@@ -26,9 +38,13 @@ import {
 } from "./shutdown.ts";
 import {
   buildVerifyOnlyCandidate,
+  parseAndValidateRetainedTranscript,
   redactAndValidateTranscript,
+  type RetainedProtocolRecord,
+  serializeRetainedTranscript,
   TranscriptRecorder,
   TranscriptValidationError,
+  validateLifecycleRecords,
   type VerifyOnlyCandidate,
 } from "./transcript.ts";
 
@@ -44,6 +60,53 @@ const FORWARDED_ENVIRONMENT = [
   "LC_ALL",
   "SHELL",
 ] as const;
+const REQUIRED_ACCEPTANCE_GATES = [
+  "authenticatedTurnCompleted",
+  "coverageComplete",
+  "everyRetainedEnvelopeSchemaValid",
+  "exactVersions",
+  "generatedArtifactsMatch",
+  "lifecycleOrdered",
+  "noObservedDescendantsRemain",
+] as const;
+
+export type AcceptanceSummary = {
+  schemaVersion: 1;
+  runId: string;
+  recordedAt: string;
+  platform: { os: "darwin"; arch: "aarch64" };
+  versions: { deno: "2.9.3"; codex: "0.145.0" };
+  hashes: {
+    compatibility: string;
+    generatedBundle: string;
+    coverage: string;
+    transcript: string;
+  };
+  observationsMs: VerifyOnlyCandidate["summaryInputs"]["observationsMs"];
+  lifecycle: Omit<
+    VerifyOnlyCandidate["summaryInputs"]["lifecycle"],
+    "completedAgentMessages"
+  >;
+  shutdown: ShutdownEvidence;
+  gates: Record<(typeof REQUIRED_ACCEPTANCE_GATES)[number], true>;
+};
+
+export type AcceptanceProofPaths = {
+  coverage: string;
+  transcript: string;
+  summary: string;
+};
+
+export type AcceptanceProofValidation = {
+  status: "validated";
+  summary: AcceptanceSummary;
+  coverage: CoverageManifest;
+  transcript: RetainedProtocolRecord[];
+};
+
+export type AcceptanceProofStatus =
+  | AcceptanceProofValidation
+  | { status: "candidate"; reason: string };
 
 export class SpikeRunError extends Error {
   constructor(
@@ -229,9 +292,262 @@ async function recoverPinnedObservedTree(
   return evidence;
 }
 
-export async function runVerifyOnly(): Promise<VerifyOnlyCandidate> {
+function fixedProofPaths(repositoryRoot: string): AcceptanceProofPaths {
+  const root = `${repositoryRoot}/spikes/codex-app-server`;
+  return {
+    coverage: `${root}/coverage.json`,
+    transcript: `${root}/evidence/authenticated-turn.redacted.jsonl`,
+    summary: `${root}/evidence/authenticated-turn.summary.json`,
+  };
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength &&
+    left.every((byte, index) => byte === right[index]);
+}
+
+function requireAcceptanceGates(value: unknown): void {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new ContractError(
+      "ACCEPTANCE_GATES_INVALID",
+      "acceptance gates must be an object",
+    );
+  }
+  const gates = value as Record<string, unknown>;
+  const actual = Object.keys(gates).sort();
+  if (
+    JSON.stringify(actual) !==
+      JSON.stringify([...REQUIRED_ACCEPTANCE_GATES].sort())
+  ) {
+    throw new ContractError(
+      "ACCEPTANCE_GATES_INVALID",
+      "acceptance summary has a missing or unsupported true gate",
+      { expected: REQUIRED_ACCEPTANCE_GATES, actual },
+    );
+  }
+  for (const gate of REQUIRED_ACCEPTANCE_GATES) {
+    if (gates[gate] !== true) {
+      throw new ContractError(
+        "ACCEPTANCE_GATE_FALSE",
+        `acceptance-required gate ${gate} is not true`,
+      );
+    }
+  }
+}
+
+function requireShutdownAcceptance(shutdown: ShutdownEvidence): void {
+  if (
+    shutdown.directExit === undefined ||
+    shutdown.drains.stdoutCompleted !== true ||
+    shutdown.drains.stderrCompleted !== true ||
+    shutdown.remainingPids.length !== 0 ||
+    shutdown.noObservedDescendantsRemain !== true
+  ) {
+    throw new ContractError(
+      "ACCEPTANCE_SHUTDOWN_INVALID",
+      "accepted evidence requires direct status, settled drains, and no remaining observed process",
+    );
+  }
+  if (typeof shutdown.escapedDescendantContainmentProven !== "boolean") {
+    throw new ContractError(
+      "CONTAINMENT_FACT_MISSING",
+      "escaped-descendant containment must remain an explicit evidence fact",
+    );
+  }
+  if (shutdown.escapedDescendantContainmentProven) {
+    const capability = shutdown.containmentCapability;
+    if (
+      !capability.available || !capability.armedBeforeChildExecution ||
+      !capability.continuouslyTracked || !capability.creationEventsCovered ||
+      !capability.sessionEscapeCovered || !capability.reparentingCovered ||
+      capability.lossDetected || capability.overflowed
+    ) {
+      throw new ContractError(
+        "CONTAINMENT_PROOF_UNSUPPORTED",
+        "escaped-descendant containment is true without race-closing proof evidence",
+      );
+    }
+  }
+}
+
+export async function validateAcceptanceProofSet(options: {
+  repositoryRoot: string;
+  paths?: AcceptanceProofPaths;
+}): Promise<AcceptanceProofValidation> {
+  const paths = options.paths ?? fixedProofPaths(options.repositoryRoot);
+  const [coverageBytes, transcriptBytes, summaryBytes] = await Promise.all([
+    Deno.readFile(paths.coverage),
+    Deno.readFile(paths.transcript),
+    Deno.readFile(paths.summary),
+  ]);
+  const configuration = await loadConfiguration({
+    repositoryRoot: options.repositoryRoot,
+    coveragePath: paths.coverage,
+  });
+  const coverage = configuration.coverage;
+  if (!bytesEqual(coverageBytes, serializeCoverage(coverage))) {
+    throw new ContractError(
+      "COVERAGE_NOT_CANONICAL",
+      "accepted coverage must use canonical JSON with one final newline",
+    );
+  }
+  const [validator, evidenceSchema, surface] = await Promise.all([
+    ProtocolValidator.load(`${configuration.generatedRoot}/json-schema`),
+    Deno.readTextFile(
+      `${options.repositoryRoot}/spikes/codex-app-server/schemas/evidence.schema.json`,
+    ).then((source) => parseJsonRejectDuplicateKeys(source)),
+    extractStableSurface(`${configuration.generatedRoot}/json-schema`),
+  ]);
+  const transcript = parseAndValidateRetainedTranscript(
+    transcriptBytes,
+    validator,
+    evidenceSchema,
+  );
+  const summaryValue = parseJsonRejectDuplicateKeys(summaryBytes);
+  if (!bytesEqual(summaryBytes, canonicalJsonBytes(summaryValue))) {
+    throw new ContractError(
+      "SUMMARY_NOT_CANONICAL",
+      "acceptance summary must use canonical JSON with one final newline",
+    );
+  }
+  validateJsonAgainstSchema(
+    evidenceSchema,
+    summaryValue,
+    "ACCEPTANCE_SUMMARY_SCHEMA_INVALID",
+  );
+  const summary = summaryValue as AcceptanceSummary;
+  requireAcceptanceGates(summary.gates);
+  requireShutdownAcceptance(summary.shutdown);
+
+  if (
+    summary.versions.deno !== configuration.compatibility.deno.version ||
+    summary.versions.codex !== configuration.compatibility.codex.cliVersion ||
+    summary.platform.os !== configuration.compatibility.validationPlatform.os ||
+    summary.platform.arch !==
+      configuration.compatibility.validationPlatform.arch
+  ) {
+    throw new ContractError(
+      "ACCEPTANCE_VERSION_PLATFORM_MISMATCH",
+      "acceptance versions or platform disagree with immutable compatibility inputs",
+    );
+  }
+  const compatibilityValue = parseJsonRejectDuplicateKeys(
+    await Deno.readFile(configuration.compatibilityPath),
+  );
+  const expectedHashes = {
+    compatibility: await hashCanonicalJson(compatibilityValue),
+    generatedBundle: configuration.compatibility.generation.bundleSha256,
+    coverage: await sha256Hex(coverageBytes),
+    transcript: await sha256Hex(transcriptBytes),
+  };
+  if (
+    summary.hashes.compatibility !== expectedHashes.compatibility ||
+    summary.hashes.generatedBundle !== expectedHashes.generatedBundle ||
+    summary.hashes.coverage !== expectedHashes.coverage ||
+    summary.hashes.transcript !== expectedHashes.transcript
+  ) {
+    throw new ContractError(
+      "ACCEPTANCE_HASH_MISMATCH",
+      "acceptance cross-hashes disagree with current immutable or proof artifacts",
+      { expected: expectedHashes, observed: summary.hashes },
+    );
+  }
+
+  validateCoverageMembership(coverage, surface);
+  deriveCoverageFromJournal(coverage, surface, transcript, coverage);
+  const lifecycle = validateLifecycleRecords(transcript, {
+    threadId: summary.lifecycle.threadId,
+    turnId: summary.lifecycle.turnId,
+  });
+  if (
+    lifecycle.terminalStatus !== "completed" ||
+    lifecycle.completedItems !== summary.lifecycle.completedItems ||
+    summary.lifecycle.terminalStatus !== "completed" ||
+    summary.lifecycle.stdoutLines !==
+      transcript.filter((record) => record.direction === "server").length
+  ) {
+    throw new ContractError(
+      "ACCEPTANCE_LIFECYCLE_MISMATCH",
+      "acceptance lifecycle summary disagrees with the retained journal",
+    );
+  }
+  return { status: "validated", summary, coverage, transcript };
+}
+
+export async function deriveAcceptanceProofStatus(options: {
+  repositoryRoot: string;
+  paths?: AcceptanceProofPaths;
+}): Promise<AcceptanceProofStatus> {
+  try {
+    return await validateAcceptanceProofSet(options);
+  } catch (error) {
+    return {
+      status: "candidate",
+      reason: error instanceof ContractError ||
+          error instanceof TranscriptValidationError
+        ? error.code
+        : error instanceof Deno.errors.NotFound
+        ? "PROOF_SET_MEMBER_MISSING"
+        : "PROOF_SET_INVALID",
+    };
+  }
+}
+
+export async function publishAcceptanceProofSet(options: {
+  repositoryRoot: string;
+  coverageBytes: Uint8Array;
+  transcriptBytes: Uint8Array;
+  summaryBytes: Uint8Array;
+  beforeReplace?: (path: string, index: number) => void | Promise<void>;
+  afterReplace?: (path: string, index: number) => void | Promise<void>;
+}): Promise<AcceptanceProofValidation> {
+  const outputs = fixedProofPaths(options.repositoryRoot);
+  const evidenceDirectory =
+    `${options.repositoryRoot}/spikes/codex-app-server/evidence`;
+  await Deno.mkdir(evidenceDirectory, { recursive: true });
+  const stagingDirectory = await Deno.makeTempDir({
+    dir: evidenceDirectory,
+    prefix: ".acceptance-stage-",
+  });
+  const staged: AcceptanceProofPaths = {
+    coverage: `${stagingDirectory}/coverage.json`,
+    transcript: `${stagingDirectory}/authenticated-turn.redacted.jsonl`,
+    summary: `${stagingDirectory}/authenticated-turn.summary.json`,
+  };
+  try {
+    await Promise.all([
+      Deno.writeFile(staged.coverage, options.coverageBytes),
+      Deno.writeFile(staged.transcript, options.transcriptBytes),
+      Deno.writeFile(staged.summary, options.summaryBytes),
+    ]);
+    await validateAcceptanceProofSet({
+      repositoryRoot: options.repositoryRoot,
+      paths: staged,
+    });
+    const replacements = [
+      [staged.coverage, outputs.coverage],
+      [staged.transcript, outputs.transcript],
+      [staged.summary, outputs.summary],
+    ] as const;
+    for (let index = 0; index < replacements.length; index++) {
+      const [source, destination] = replacements[index];
+      await options.beforeReplace?.(destination, index);
+      await Deno.rename(source, destination);
+      await options.afterReplace?.(destination, index);
+    }
+  } finally {
+    await Deno.remove(stagingDirectory, { recursive: true }).catch(() => {});
+  }
+  return await validateAcceptanceProofSet({
+    repositoryRoot: options.repositoryRoot,
+  });
+}
+
+export async function runVerifyOnly(
+  mode: "spike:verify" | "spike:accept" = "spike:verify",
+): Promise<VerifyOnlyCandidate> {
   await runStaticPreflight({
-    mode: "spike:verify",
+    mode,
     codexExecutable: CODEX_EXECUTABLE,
   });
   const configuration = await verifyProtocol(CODEX_EXECUTABLE, 1);
@@ -356,6 +672,55 @@ export async function runVerifyOnly(): Promise<VerifyOnlyCandidate> {
   });
 }
 
+export async function runAcceptance(): Promise<AcceptanceProofValidation> {
+  const candidate = await runVerifyOnly("spike:accept");
+  const configuration = await verifyProtocol(CODEX_EXECUTABLE, 1);
+  if (
+    candidate.coverage.generatedBundleSha256 !==
+      configuration.compatibility.generation.bundleSha256
+  ) {
+    throw new ContractError(
+      "ACCEPTANCE_INPUT_STALE",
+      "live candidate coverage disagrees with the immediately reverified generated bundle",
+    );
+  }
+  const coverageBytes = serializeCoverage(candidate.coverage);
+  const transcriptBytes = serializeRetainedTranscript(candidate.transcript);
+  const compatibilityValue = parseJsonRejectDuplicateKeys(
+    await Deno.readFile(configuration.compatibilityPath),
+  );
+  const summary: AcceptanceSummary = {
+    schemaVersion: 1,
+    runId: crypto.randomUUID(),
+    recordedAt: new Date().toISOString(),
+    platform: candidate.summaryInputs.platform,
+    versions: candidate.summaryInputs.versions,
+    hashes: {
+      compatibility: await hashCanonicalJson(compatibilityValue),
+      generatedBundle: configuration.compatibility.generation.bundleSha256,
+      coverage: await sha256Hex(coverageBytes),
+      transcript: await sha256Hex(transcriptBytes),
+    },
+    observationsMs: candidate.summaryInputs.observationsMs,
+    lifecycle: {
+      stdoutLines: candidate.summaryInputs.lifecycle.stdoutLines,
+      stderrBytes: candidate.summaryInputs.lifecycle.stderrBytes,
+      threadId: candidate.summaryInputs.lifecycle.threadId,
+      turnId: candidate.summaryInputs.lifecycle.turnId,
+      terminalStatus: candidate.summaryInputs.lifecycle.terminalStatus,
+      completedItems: candidate.summaryInputs.lifecycle.completedItems,
+    },
+    shutdown: candidate.summaryInputs.shutdown,
+    gates: candidate.summaryInputs.gates,
+  };
+  return await publishAcceptanceProofSet({
+    repositoryRoot: configuration.repositoryRoot,
+    coverageBytes,
+    transcriptBytes,
+    summaryBytes: canonicalJsonBytes(summary),
+  });
+}
+
 function blockerFor(error: unknown): {
   code: string;
   stage: string;
@@ -471,15 +836,29 @@ function safeSuccess(candidate: VerifyOnlyCandidate): Record<string, unknown> {
 if (import.meta.main) {
   try {
     const mode = Deno.args[0] ?? "verify";
-    if (mode !== "verify") {
+    if (mode !== "verify" && mode !== "accept") {
       throw new SpikeRunError(
-        "ACCEPTANCE_NOT_IMPLEMENTED",
-        "acceptance publication belongs to Phase 6",
-        "acceptance",
-        "run spike:verify until the separately reviewed publication phase is implemented",
+        "SPIKE_MODE_INVALID",
+        `unsupported spike mode ${mode}`,
+        "startup",
+        "run the repository-owned spike:verify or spike:accept task",
       );
     }
-    console.log(JSON.stringify(safeSuccess(await runVerifyOnly())));
+    if (mode === "accept") {
+      const accepted = await runAcceptance();
+      console.log(JSON.stringify({
+        status: accepted.status,
+        evidence: "published-proof-set",
+        hashes: accepted.summary.hashes,
+        retainedRecords: accepted.transcript.length,
+        observedCoverageEntries: accepted.coverage.entries.filter((entry) =>
+          entry.observedCount > 0
+        ).length,
+        gates: accepted.summary.gates,
+      }));
+    } else {
+      console.log(JSON.stringify(safeSuccess(await runVerifyOnly())));
+    }
   } catch (error) {
     console.error(JSON.stringify({
       status: "blocked",

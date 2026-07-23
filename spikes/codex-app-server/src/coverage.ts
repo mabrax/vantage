@@ -202,6 +202,15 @@ export function deriveCoverageFromJournal(
   const entries = baseline.entries.map((entry): CoverageEntry => {
     const observedCount = counts.get(entryKey(entry)) ?? 0;
     if (observedCount === 0) {
+      if (entry.disposition === "exercised") {
+        return {
+          ...entry,
+          disposition: "schema-validated-unexercised",
+          rationale:
+            "Present in the pinned stable schema but not observed in this accepted journal.",
+          observedCount: 0,
+        };
+      }
       return { ...entry, observedCount: 0 };
     }
     if (entry.disposition === "unsupported") {

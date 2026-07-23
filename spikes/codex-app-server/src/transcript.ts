@@ -1,6 +1,8 @@
 import type { TransportDiagnostic } from "./diagnostics.ts";
 import {
+  canonicalJsonBytes,
   type CoverageManifest,
+  parseJsonRejectDuplicateKeys,
   type RegenerationVerifiedConfiguration,
   sha256Hex,
 } from "./config.ts";
@@ -190,6 +192,27 @@ export type VerifyOnlyCandidate = {
     };
   };
 };
+
+export function serializeRetainedTranscript(
+  records: readonly RetainedProtocolRecord[],
+): Uint8Array {
+  assertRecordOrder(records);
+  const lines = records.map((record) => canonicalJsonBytes(record));
+  const size = lines.reduce((total, line) => total + line.byteLength, 0);
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const line of lines) {
+    result.set(line, offset);
+    offset += line.byteLength;
+  }
+  return result;
+}
+
+export async function hashRetainedTranscript(
+  records: readonly RetainedProtocolRecord[],
+): Promise<string> {
+  return await sha256Hex(serializeRetainedTranscript(records));
+}
 
 export class TranscriptValidationError extends Error {
   constructor(
@@ -964,6 +987,158 @@ function assertRecordOrder(records: readonly ProtocolRecord[]): void {
       wireIndex = record.wireIndex;
     }
   });
+}
+
+function assertCanonicalLine(
+  value: unknown,
+  line: string,
+  observationIndex: number,
+): void {
+  const canonical = new TextDecoder().decode(canonicalJsonBytes(value));
+  if (canonical !== `${line}\n`) {
+    throw new TranscriptValidationError(
+      "TRANSCRIPT_NOT_CANONICAL",
+      `retained record ${observationIndex} is not canonically serialized`,
+    );
+  }
+}
+
+export function parseAndValidateRetainedTranscript(
+  bytes: Uint8Array,
+  validator: ProtocolValidator,
+  evidenceSchema: unknown,
+): RetainedProtocolRecord[] {
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new TranscriptValidationError(
+      "TRANSCRIPT_UTF8_INVALID",
+      "retained transcript is not strict UTF-8",
+    );
+  }
+  if (!source.endsWith("\n")) {
+    throw new TranscriptValidationError(
+      "TRANSCRIPT_FINAL_NEWLINE_MISSING",
+      "retained transcript must end with exactly one complete JSONL record",
+    );
+  }
+  const lines = source.slice(0, -1).split("\n");
+  if (lines.length === 0 || lines.some((line) => line.length === 0)) {
+    throw new TranscriptValidationError(
+      "TRANSCRIPT_RECORD_MISSING",
+      "retained transcript must contain only non-empty JSONL records",
+    );
+  }
+  const records = lines.map((line, index) => {
+    const value = parseJsonRejectDuplicateKeys(line);
+    assertCanonicalLine(value, line, index);
+    validateJsonAgainstSchema(
+      evidenceSchema,
+      value,
+      "EVIDENCE_SCHEMA_INVALID",
+    );
+    return value as RetainedProtocolRecord;
+  });
+  assertRecordOrder(records);
+
+  const pendingClient = new Map<RequestId, string>();
+  const pendingServer = new Map<RequestId, string>();
+  for (const record of records) {
+    const schemaId = record.schema.id;
+    const separator = schemaId.indexOf(":");
+    if (separator < 1 || separator === schemaId.length - 1) {
+      throw new TranscriptValidationError(
+        "RETAINED_SCHEMA_ID_INVALID",
+        `record ${record.observationIndex} has an invalid schema proof ID`,
+      );
+    }
+    const direction = schemaId.slice(0, separator);
+    const method = schemaId.slice(separator + 1);
+    if (record.direction === "client") {
+      if (record.method === "<server-request-response>") {
+        if (
+          direction !== "server-request-response" ||
+          record.id === undefined ||
+          pendingServer.get(record.id) !== method
+        ) {
+          throw new TranscriptValidationError(
+            "UNMATCHED_SERVER_REQUEST_RESPONSE",
+            `record ${record.observationIndex} does not match a retained server request`,
+          );
+        }
+        validator.validateResponseEnvelope(
+          "server-request",
+          method,
+          responseEnvelopeForClientRecord(record),
+        );
+        pendingServer.delete(record.id);
+        continue;
+      }
+      const expectedDirection = protocolDirectionForClient(record);
+      if (direction !== expectedDirection || method !== record.method) {
+        throw new TranscriptValidationError(
+          "RETAINED_SCHEMA_ID_MISMATCH",
+          `record ${record.observationIndex} schema proof disagrees with its client envelope`,
+        );
+      }
+      validator.validateEnvelope(expectedDirection, clientEnvelope(record));
+      if (record.id !== undefined) pendingClient.set(record.id, method);
+      continue;
+    }
+    const envelope = record.envelope;
+    if (envelope === undefined) {
+      throw new TranscriptValidationError(
+        "RAW_SERVER_RECORD_INVALID",
+        `record ${record.observationIndex} has no retained envelope`,
+      );
+    }
+    if (envelope.kind === "response") {
+      const expectedMethod = pendingClient.get(envelope.id);
+      if (
+        direction !== "client-response" || expectedMethod === undefined ||
+        expectedMethod !== method
+      ) {
+        throw new TranscriptValidationError(
+          "UNMATCHED_RESPONSE",
+          `record ${record.observationIndex} does not match a retained client request`,
+        );
+      }
+      validator.validateResponseEnvelope(
+        "client-request",
+        method,
+        responseEnvelope(envelope),
+      );
+      pendingClient.delete(envelope.id);
+      continue;
+    }
+    const expectedDirection = envelope.kind === "server-notification"
+      ? "server-notification"
+      : "server-request";
+    if (direction !== expectedDirection || method !== envelope.method) {
+      throw new TranscriptValidationError(
+        "RETAINED_SCHEMA_ID_MISMATCH",
+        `record ${record.observationIndex} schema proof disagrees with its server envelope`,
+      );
+    }
+    validator.validateEnvelope(expectedDirection, protocolEnvelope(envelope));
+    if (envelope.kind === "server-request") {
+      if (pendingServer.has(envelope.id)) {
+        throw new TranscriptValidationError(
+          "DUPLICATE_SERVER_REQUEST_ID",
+          `server request ${String(envelope.id)} was retained more than once`,
+        );
+      }
+      pendingServer.set(envelope.id, method);
+    }
+  }
+  if (pendingClient.size > 0 || pendingServer.size > 0) {
+    throw new TranscriptValidationError(
+      "PENDING_RESPONSE_MISSING",
+      "retained transcript ends with unmatched protocol requests",
+    );
+  }
+  return records;
 }
 
 export async function redactAndValidateTranscript(

@@ -1,4 +1,9 @@
 import {
+  deriveCoverageFromJournal,
+  extractStableSurface,
+  serializeCoverage,
+} from "../src/coverage.ts";
+import {
   canonicalJsonBytes,
   compareGeneratedTrees,
   ContractError,
@@ -9,9 +14,20 @@ import {
   ORDERING_EXCEPTION,
   parseJsonRejectDuplicateKeys,
   resolveRepositoryPath,
+  sha256Hex,
 } from "../src/config.ts";
 import { verifyProtocol } from "../src/generate_protocol.ts";
+import {
+  type AcceptanceSummary,
+  deriveAcceptanceProofStatus,
+  publishAcceptanceProofSet,
+} from "../src/main.ts";
 import { validateJsonAgainstSchema } from "../src/protocol_validation.ts";
+import type { ShutdownEvidence } from "../src/shutdown.ts";
+import {
+  type RetainedProtocolRecord,
+  serializeRetainedTranscript,
+} from "../src/transcript.ts";
 
 function assert(
   condition: unknown,
@@ -84,6 +100,281 @@ async function makeConfigurationFixture(
     `${root}/spikes/codex-app-server/generated`,
   );
   return root;
+}
+
+type ProofFixture = {
+  root: string;
+  coverageBytes: Uint8Array;
+  transcriptBytes: Uint8Array;
+  summaryBytes: Uint8Array;
+};
+
+async function makeValidProofFixture(
+  repositoryRoot: string,
+): Promise<ProofFixture> {
+  const root = await makeConfigurationFixture(repositoryRoot);
+  const configuration = await loadConfiguration({ repositoryRoot: root });
+  const threadId = "thread-proof";
+  const turnId = "turn-proof";
+  const itemId = "item-proof";
+  const redactedText = `[redacted-text:sha256:${"0".repeat(64)}]`;
+  const redactedPath = `/redacted/path/${"0".repeat(24)}`;
+  const thread = {
+    id: threadId,
+    sessionId: "session-proof",
+    preview: "",
+    ephemeral: true,
+    modelProvider: "fake",
+    createdAt: 1,
+    updatedAt: 1,
+    status: { type: "idle" },
+    cwd: redactedPath,
+    cliVersion: "0.145.0",
+    source: "appServer",
+    turns: [],
+  };
+  const activeTurn = { id: turnId, items: [], status: "inProgress" };
+  const completedItem = {
+    type: "agentMessage",
+    id: itemId,
+    text: redactedText,
+  };
+  let observationIndex = 0;
+  let wireIndex = 0;
+  const client = (
+    method: string,
+    params: unknown,
+    id?: number,
+    nativeIds: Record<string, string> = {},
+  ): RetainedProtocolRecord => {
+    const record: Record<string, unknown> = {
+      direction: "client",
+      observationIndex: observationIndex++,
+      monotonicOffsetMs: observationIndex,
+      method,
+      params,
+      byteLength: 1,
+      schema: {
+        id: `${
+          id === undefined ? "client-notification" : "client-request"
+        }:${method}`,
+        valid: true,
+      },
+      nativeIds,
+    };
+    if (id !== undefined) record.id = id;
+    return record as RetainedProtocolRecord;
+  };
+  const response = (
+    id: number,
+    method: string,
+    result: unknown,
+    nativeIds: Record<string, string> = {},
+  ): RetainedProtocolRecord =>
+    ({
+      direction: "server",
+      observationIndex: observationIndex++,
+      wireIndex: wireIndex++,
+      monotonicOffsetMs: observationIndex,
+      byteLength: 1,
+      envelope: { kind: "response", id, result },
+      schema: { id: `client-response:${method}`, valid: true },
+      nativeIds,
+    }) as RetainedProtocolRecord;
+  const notification = (
+    method: string,
+    params: unknown,
+    nativeIds: Record<string, string> = {},
+  ): RetainedProtocolRecord =>
+    ({
+      direction: "server",
+      observationIndex: observationIndex++,
+      wireIndex: wireIndex++,
+      monotonicOffsetMs: observationIndex,
+      byteLength: 1,
+      envelope: { kind: "server-notification", method, params },
+      schema: { id: `server-notification:${method}`, valid: true },
+      nativeIds,
+    }) as RetainedProtocolRecord;
+  const transcript: RetainedProtocolRecord[] = [
+    client("initialize", {
+      clientInfo: {
+        name: "vantage-protocol-spike",
+        title: "Vantage protocol compatibility spike",
+        version: "1",
+      },
+      capabilities: null,
+    }, 1),
+    response(1, "initialize", {
+      codexHome: redactedPath,
+      platformFamily: "unix",
+      platformOs: "macos",
+      userAgent: "proof",
+    }),
+    client("initialized", undefined),
+    client("thread/start", {
+      model: "offline-model",
+      cwd: redactedPath,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      ephemeral: true,
+    }, 2),
+    response(2, "thread/start", {
+      thread,
+      model: "offline-model",
+      modelProvider: "fake",
+      cwd: redactedPath,
+      instructionSources: [],
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandbox: { type: "readOnly" },
+    }, { threadId }),
+    notification("thread/started", { thread }, { threadId }),
+    client(
+      "turn/start",
+      {
+        threadId,
+        input: [{ type: "text", text: redactedText, text_elements: [] }],
+      },
+      3,
+      { threadId },
+    ),
+    response(3, "turn/start", { turn: activeTurn }, { turnId }),
+    notification(
+      "turn/started",
+      { threadId, turn: activeTurn },
+      { threadId, turnId },
+    ),
+    notification("item/started", {
+      item: { type: "agentMessage", id: itemId, text: "" },
+      threadId,
+      turnId,
+      startedAtMs: 1,
+    }, { threadId, turnId, itemId }),
+    notification("item/agentMessage/delta", {
+      threadId,
+      turnId,
+      itemId,
+      delta: redactedText,
+    }, { threadId, turnId, itemId }),
+    notification("item/completed", {
+      item: completedItem,
+      threadId,
+      turnId,
+      completedAtMs: 2,
+    }, { threadId, turnId, itemId }),
+    notification("turn/completed", {
+      threadId,
+      turn: { id: turnId, items: [completedItem], status: "completed" },
+    }, { threadId, turnId }),
+  ];
+  const [evidenceSchema, surface] = await Promise.all([
+    Deno.readTextFile(
+      `${root}/spikes/codex-app-server/schemas/evidence.schema.json`,
+    ).then(JSON.parse),
+    extractStableSurface(`${configuration.generatedRoot}/json-schema`),
+  ]);
+  for (const record of transcript) {
+    validateJsonAgainstSchema(
+      evidenceSchema,
+      record,
+      "EVIDENCE_SCHEMA_INVALID",
+    );
+  }
+  const coverage = deriveCoverageFromJournal(
+    configuration.coverage,
+    surface,
+    transcript,
+  );
+  const coverageBytes = serializeCoverage(coverage);
+  const transcriptBytes = serializeRetainedTranscript(transcript);
+  const shutdown = {
+    rootIdentity: {
+      rootPid: 100,
+      processGroupId: 100,
+      sessionId: 100,
+    },
+    observedPids: [100],
+    lineageEvents: [],
+    signalPath: ["stdin-close"],
+    timedOutStages: [],
+    directExit: { success: true, code: 0, signal: null },
+    drains: { stdoutCompleted: true, stderrCompleted: true },
+    timings: {
+      startedAtMs: 1,
+      stdinClosedAtMs: 2,
+      directExitAtMs: 3,
+      completedAtMs: 4,
+      totalMs: 3,
+    },
+    remainingPids: [],
+    noObservedDescendantsRemain: true,
+    containmentCapability: {
+      facility: "snapshot-only",
+      available: false,
+      armedBeforeChildExecution: false,
+      continuouslyTracked: false,
+      creationEventsCovered: false,
+      sessionEscapeCovered: false,
+      reparentingCovered: false,
+      lossDetected: false,
+      overflowed: false,
+      unavailableReason: "test fixture has no race-closing tracker",
+    },
+    escapedDescendantContainmentProven: false,
+    diagnostics: [],
+  } as ShutdownEvidence;
+  const compatibility = parseJsonRejectDuplicateKeys(
+    await Deno.readFile(configuration.compatibilityPath),
+  );
+  const summary: AcceptanceSummary = {
+    schemaVersion: 1,
+    runId: "proof-fixture",
+    recordedAt: "2026-07-23T00:00:00.000Z",
+    platform: { os: "darwin", arch: "aarch64" },
+    versions: { deno: "2.9.3", codex: "0.145.0" },
+    hashes: {
+      compatibility: await hashCanonicalJson(compatibility),
+      generatedBundle: configuration.compatibility.generation.bundleSha256,
+      coverage: await sha256Hex(coverageBytes),
+      transcript: await sha256Hex(transcriptBytes),
+    },
+    observationsMs: {
+      spawnToInitializeResponse: 1,
+      initializeToReady: 1,
+      turnStartToFirstEvent: 1,
+      turnStartToCompleted: 2,
+      stdinCloseToExit: 1,
+      totalShutdown: 3,
+    },
+    lifecycle: {
+      stdoutLines:
+        transcript.filter((record) => record.direction === "server").length,
+      stderrBytes: 0,
+      threadId,
+      turnId,
+      terminalStatus: "completed",
+      completedItems: 1,
+    },
+    shutdown,
+    gates: {
+      exactVersions: true,
+      generatedArtifactsMatch: true,
+      coverageComplete: true,
+      everyRetainedEnvelopeSchemaValid: true,
+      lifecycleOrdered: true,
+      authenticatedTurnCompleted: true,
+      noObservedDescendantsRemain: true,
+    },
+  };
+  const summaryBytes = canonicalJsonBytes(summary);
+  await publishAcceptanceProofSet({
+    repositoryRoot: root,
+    coverageBytes,
+    transcriptBytes,
+    summaryBytes,
+  });
+  return { root, coverageBytes, transcriptBytes, summaryBytes };
 }
 
 async function writeTinyTree(
@@ -351,6 +642,162 @@ Deno.test("strict JSON and canonical proof hashing are deterministic", async () 
     await hashCanonicalJson({ b: 2, a: 1 }),
     await hashCanonicalJson({ a: 1, b: 2 }),
   );
+});
+
+Deno.test("acceptance proof sets validate atomically and reject stale or partial state", async () => {
+  const repositoryRoot = await discoverRepositoryRoot();
+  const fixture = await makeValidProofFixture(repositoryRoot);
+  const paths = {
+    coverage: `${fixture.root}/spikes/codex-app-server/coverage.json`,
+    transcript:
+      `${fixture.root}/spikes/codex-app-server/evidence/authenticated-turn.redacted.jsonl`,
+    summary:
+      `${fixture.root}/spikes/codex-app-server/evidence/authenticated-turn.summary.json`,
+  };
+  const restore = async () => {
+    await Promise.all([
+      Deno.writeFile(paths.coverage, fixture.coverageBytes),
+      Deno.writeFile(paths.transcript, fixture.transcriptBytes),
+      Deno.writeFile(paths.summary, fixture.summaryBytes),
+    ]);
+  };
+  const expectCandidate = async (label: string) => {
+    assertEquals(
+      (await deriveAcceptanceProofStatus({
+        repositoryRoot: fixture.root,
+      })).status,
+      "candidate",
+      label,
+    );
+    await restore();
+  };
+  try {
+    const valid = await deriveAcceptanceProofStatus({
+      repositoryRoot: fixture.root,
+    });
+    assertEquals(valid.status, "validated");
+    assert(
+      valid.status === "validated" &&
+        valid.summary.shutdown.escapedDescendantContainmentProven === false,
+      "accurate false escaped-containment evidence must remain eligible",
+    );
+
+    await Deno.remove(paths.transcript);
+    await expectCandidate("missing proof member");
+
+    await Deno.writeFile(
+      paths.coverage,
+      canonicalJsonBytes({
+        ...parseJsonRejectDuplicateKeys(fixture.coverageBytes) as object,
+        generatedBundleSha256: "0".repeat(64),
+      }),
+    );
+    await expectCandidate("stale coverage");
+
+    await Deno.writeFile(
+      paths.transcript,
+      new Uint8Array([...fixture.transcriptBytes, 0x0a]),
+    );
+    await expectCandidate("non-canonical transcript");
+
+    const mutateSummary = async (
+      mutate: (summary: Record<string, unknown>) => void,
+      label: string,
+    ) => {
+      const summary = structuredClone(
+        parseJsonRejectDuplicateKeys(fixture.summaryBytes),
+      ) as Record<string, unknown>;
+      mutate(summary);
+      await Deno.writeFile(paths.summary, canonicalJsonBytes(summary));
+      await expectCandidate(label);
+    };
+    await mutateSummary((summary) => {
+      (summary.hashes as Record<string, unknown>).transcript = "0".repeat(64);
+    }, "cross-hash mismatch");
+    await mutateSummary((summary) => {
+      (summary.gates as Record<string, unknown>).lifecycleOrdered = false;
+    }, "false required gate");
+    await mutateSummary((summary) => {
+      delete (summary.gates as Record<string, unknown>).coverageComplete;
+    }, "missing required gate");
+    await mutateSummary((summary) => {
+      (summary.gates as Record<string, unknown>)
+        .escapedDescendantContainmentProven = true;
+    }, "unsupported extra true gate");
+    await mutateSummary((summary) => {
+      delete (summary.shutdown as Record<string, unknown>)
+        .escapedDescendantContainmentProven;
+    }, "missing shutdown fact");
+    await mutateSummary((summary) => {
+      (summary.shutdown as Record<string, unknown>).remainingPids = [101];
+    }, "remaining observed PID");
+    await mutateSummary((summary) => {
+      (summary.shutdown as Record<string, unknown>)
+        .escapedDescendantContainmentProven = true;
+    }, "unsupported true containment claim");
+
+    const compatibilityPath =
+      `${fixture.root}/spikes/codex-app-server/compatibility.json`;
+    const compatibility = await Deno.readTextFile(compatibilityPath);
+    const changedCompatibility = JSON.parse(compatibility);
+    changedCompatibility.limits.maxQueueMessages++;
+    await Deno.writeFile(
+      compatibilityPath,
+      canonicalJsonBytes(changedCompatibility),
+    );
+    await expectCandidate("changed immutable manifest");
+    await Deno.writeTextFile(compatibilityPath, compatibility);
+
+    const transcriptValues = new TextDecoder().decode(fixture.transcriptBytes)
+      .trimEnd().split("\n").map((line) =>
+        parseJsonRejectDuplicateKeys(line) as Record<string, unknown>
+      );
+    for (const value of transcriptValues) {
+      value.monotonicOffsetMs = Number(value.monotonicOffsetMs) + 0.25;
+    }
+    const nextTranscriptBytes = new TextEncoder().encode(
+      transcriptValues.map((value) =>
+        new TextDecoder().decode(canonicalJsonBytes(value))
+      ).join(""),
+    );
+    const nextSummary = structuredClone(
+      parseJsonRejectDuplicateKeys(fixture.summaryBytes),
+    ) as Record<string, unknown>;
+    nextSummary.runId = "interrupted-replacement";
+    (nextSummary.hashes as Record<string, unknown>).transcript =
+      await sha256Hex(nextTranscriptBytes);
+    const nextSummaryBytes = canonicalJsonBytes(nextSummary);
+    for (const interruptedIndex of [0, 1, 2]) {
+      await restore();
+      await assertRejectsCode(
+        () =>
+          publishAcceptanceProofSet({
+            repositoryRoot: fixture.root,
+            coverageBytes: fixture.coverageBytes,
+            transcriptBytes: nextTranscriptBytes,
+            summaryBytes: nextSummaryBytes,
+            beforeReplace: async (path, index) => {
+              if (index !== interruptedIndex) return;
+              if (index < 2) await Deno.remove(path);
+              throw new ContractError(
+                "PUBLICATION_INTERRUPTED",
+                "injected replacement interruption",
+              );
+            },
+          }),
+        "PUBLICATION_INTERRUPTED",
+      );
+      assertEquals(
+        (await deriveAcceptanceProofStatus({
+          repositoryRoot: fixture.root,
+        })).status,
+        "candidate",
+        `interruption before output ${interruptedIndex}`,
+      );
+    }
+  } finally {
+    await Deno.remove(fixture.root, { recursive: true });
+  }
 });
 
 Deno.test({
