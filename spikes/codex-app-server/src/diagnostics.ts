@@ -213,11 +213,13 @@ function defaultMessage(code: TransportDiagnosticCode): string {
       "the process group did not exit within the force-termination bound",
     DESCENDANT_LEAK:
       "one or more observed descendant processes remain after shutdown",
-    TRACKER_UNAVAILABLE: "a race-closing descendant tracker is unavailable",
+    TRACKER_UNAVAILABLE:
+      "a race-closing descendant tracker is unavailable; observed-tree cleanup remains the scoped boundary",
     TRACKER_LOST: "the descendant tracker lost lineage events",
     TRACKER_OVERFLOWED:
       "the descendant tracker overflowed before shutdown completed",
-    CONTAINMENT_UNPROVEN: "escaped-descendant containment could not be proven",
+    CONTAINMENT_UNPROVEN:
+      "absolute escaped-descendant containment could not be proven",
   };
   return messages[code];
 }

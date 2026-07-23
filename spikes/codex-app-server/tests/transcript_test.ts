@@ -534,8 +534,36 @@ Deno.test("local evidence schema rejects credential fields and keeps shutdown ga
       completedItems: 1,
     },
     shutdown: {
+      rootIdentity: { rootPid: 101, processGroupId: 101, sessionId: 101 },
+      observedPids: [101],
+      lineageEvents: [],
+      signalPath: ["stdin-close"],
+      timedOutStages: [],
+      directExit: { success: true, code: 0, signal: null },
+      drains: { stdoutCompleted: true, stderrCompleted: true },
+      timings: {
+        startedAtMs: 1,
+        stdinClosedAtMs: 2,
+        directExitAtMs: 3,
+        completedAtMs: 4,
+        totalMs: 3,
+      },
+      remainingPids: [],
       noObservedDescendantsRemain: true,
+      containmentCapability: {
+        facility: "snapshot-only",
+        available: false,
+        armedBeforeChildExecution: false,
+        continuouslyTracked: false,
+        creationEventsCovered: false,
+        sessionEscapeCovered: false,
+        reparentingCovered: false,
+        lossDetected: false,
+        overflowed: false,
+        unavailableReason: "race-closing tracker unavailable",
+      },
       escapedDescendantContainmentProven: false,
+      diagnostics: [],
     },
     gates: {
       exactVersions: true,
@@ -545,7 +573,6 @@ Deno.test("local evidence schema rejects credential fields and keeps shutdown ga
       lifecycleOrdered: true,
       authenticatedTurnCompleted: true,
       noObservedDescendantsRemain: true,
-      escapedDescendantContainmentProven: false,
     },
   };
   validateJsonAgainstSchema(evidenceSchema, summary);
@@ -557,6 +584,31 @@ Deno.test("local evidence schema rejects credential fields and keeps shutdown ga
       validateJsonAgainstSchema(
         evidenceSchema,
         missingProof,
+        "EVIDENCE_SCHEMA_INVALID",
+      ),
+    "EVIDENCE_SCHEMA_INVALID",
+  );
+  const observedLeak = structuredClone(summary) as Record<string, unknown>;
+  const observedLeakShutdown = observedLeak.shutdown as Record<string, unknown>;
+  observedLeakShutdown.remainingPids = [202];
+  observedLeakShutdown.noObservedDescendantsRemain = false;
+  assertThrowsCode(
+    () =>
+      validateJsonAgainstSchema(
+        evidenceSchema,
+        observedLeak,
+        "EVIDENCE_SCHEMA_INVALID",
+      ),
+    "EVIDENCE_SCHEMA_INVALID",
+  );
+  const unsupportedProof = structuredClone(summary) as Record<string, unknown>;
+  (unsupportedProof.shutdown as Record<string, unknown>)
+    .escapedDescendantContainmentProven = true;
+  assertThrowsCode(
+    () =>
+      validateJsonAgainstSchema(
+        evidenceSchema,
+        unsupportedProof,
         "EVIDENCE_SCHEMA_INVALID",
       ),
     "EVIDENCE_SCHEMA_INVALID",

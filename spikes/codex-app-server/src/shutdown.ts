@@ -111,7 +111,7 @@ export class ShutdownController {
       | { code: TransportDiagnosticCode; stage: string; nextAction: string }
       | undefined;
 
-    const recordFailure = (
+    const retainDiagnostic = (
       code: TransportDiagnosticCode,
       stage: string,
       nextAction: string,
@@ -128,6 +128,16 @@ export class ShutdownController {
         nextAction,
       });
       diagnostics.push(diagnostic);
+      return diagnostic;
+    };
+
+    const recordFailure = (
+      code: TransportDiagnosticCode,
+      stage: string,
+      nextAction: string,
+      observed?: unknown,
+    ) => {
+      retainDiagnostic(code, stage, nextAction, observed);
       if (
         !strongestFailure ||
         failureRank(code) > failureRank(strongestFailure.code)
@@ -353,18 +363,18 @@ export class ShutdownController {
       const capabilityBlocker = containmentBlockerCode(
         this.options.processTree.capability,
       );
-      recordFailure(
+      retainDiagnostic(
         capabilityBlocker,
         "shutdown.containment-capability",
-        "provide a pre-exec, continuously covering lineage facility before making a compatibility claim",
+        "retain this limitation when reporting scoped observed-tree cleanup",
         {
           proofCapabilityEvidence: this.options.processTree.capability,
         },
       );
-      recordFailure(
+      retainDiagnostic(
         "CONTAINMENT_UNPROVEN",
         "shutdown.containment-proof",
-        "keep the compatibility pair a candidate until immediate escaped-descendant containment is proven",
+        "do not claim absolute escaped-descendant containment from snapshot evidence",
         {
           snapshotEvidence: observation
             ? {
@@ -408,16 +418,14 @@ export class ShutdownController {
         escapedDescendantContainmentProven: false,
         diagnostics,
       };
-      const selected = strongestFailure ?? {
-        code: "CONTAINMENT_UNPROVEN" as const,
-        stage: "shutdown.containment-proof",
-        nextAction:
-          "keep the compatibility pair a candidate until escaped-descendant containment is proven",
-      };
-      const diagnostic = diagnostics.find((candidate) =>
-        candidate.code === selected.code && candidate.stage === selected.stage
-      ) ?? createTransportDiagnostic(selected);
-      throw new ShutdownError(diagnostic, evidence);
+      if (strongestFailure) {
+        const selected = strongestFailure;
+        const diagnostic = diagnostics.find((candidate) =>
+          candidate.code === selected.code && candidate.stage === selected.stage
+        ) ?? createTransportDiagnostic(selected);
+        throw new ShutdownError(diagnostic, evidence);
+      }
+      return evidence;
     } catch (error) {
       if (error instanceof ShutdownError) throw error;
       const completedAtMs = performance.now();

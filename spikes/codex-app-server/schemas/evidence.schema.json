@@ -399,6 +399,380 @@
         }
       ]
     },
+    "shutdownEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "containmentCapability",
+        "diagnostics",
+        "directExit",
+        "drains",
+        "escapedDescendantContainmentProven",
+        "lineageEvents",
+        "noObservedDescendantsRemain",
+        "observedPids",
+        "remainingPids",
+        "rootIdentity",
+        "signalPath",
+        "timedOutStages",
+        "timings"
+      ],
+      "properties": {
+        "rootIdentity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "processGroupId",
+            "rootPid",
+            "sessionId"
+          ],
+          "properties": {
+            "rootPid": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "processGroupId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sessionId": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "observedPids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "lineageEvents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "auditSessionId",
+              "kind",
+              "parentPid",
+              "pid",
+              "processGroupId"
+            ],
+            "properties": {
+              "kind": {
+                "const": "snapshot-observed"
+              },
+              "pid": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "parentPid": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "processGroupId": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "auditSessionId": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "signalPath": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "stdin-close",
+              "SIGTERM",
+              "SIGKILL"
+            ]
+          }
+        },
+        "timedOutStages": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "graceful",
+              "terminate",
+              "force"
+            ]
+          }
+        },
+        "directExit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "signal",
+            "success"
+          ],
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "code": {
+              "type": "integer"
+            },
+            "signal": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ]
+            }
+          }
+        },
+        "drains": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stderrCompleted",
+            "stdoutCompleted"
+          ],
+          "properties": {
+            "stdoutCompleted": {
+              "const": true
+            },
+            "stderrCompleted": {
+              "const": true
+            }
+          }
+        },
+        "timings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "completedAtMs",
+            "directExitAtMs",
+            "startedAtMs",
+            "stdinClosedAtMs",
+            "totalMs"
+          ],
+          "properties": {
+            "startedAtMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "stdinClosedAtMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "directExitAtMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "completedAtMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "totalMs": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "remainingPids": {
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "noObservedDescendantsRemain": {
+          "const": true
+        },
+        "containmentCapability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "armedBeforeChildExecution",
+            "available",
+            "continuouslyTracked",
+            "creationEventsCovered",
+            "facility",
+            "lossDetected",
+            "overflowed",
+            "reparentingCovered",
+            "sessionEscapeCovered",
+            "unavailableReason"
+          ],
+          "properties": {
+            "facility": {
+              "type": "string",
+              "minLength": 1
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "armedBeforeChildExecution": {
+              "type": "boolean"
+            },
+            "continuouslyTracked": {
+              "type": "boolean"
+            },
+            "creationEventsCovered": {
+              "type": "boolean"
+            },
+            "sessionEscapeCovered": {
+              "type": "boolean"
+            },
+            "reparentingCovered": {
+              "type": "boolean"
+            },
+            "lossDetected": {
+              "type": "boolean"
+            },
+            "overflowed": {
+              "type": "boolean"
+            },
+            "unavailableReason": {
+              "$ref": "#/definitions/safeString"
+            }
+          }
+        },
+        "escapedDescendantContainmentProven": {
+          "type": "boolean"
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "nextAction",
+              "platform",
+              "stage"
+            ],
+            "properties": {
+              "code": {
+                "enum": [
+                  "CLOSE_FAILED",
+                  "CONTAINMENT_UNPROVEN",
+                  "DESCENDANT_LEAK",
+                  "FORCE_TIMEOUT",
+                  "GRACEFUL_SHUTDOWN_TIMEOUT",
+                  "PLATFORM_UNSUPPORTED",
+                  "STREAM_FAILED",
+                  "TERMINATE_TIMEOUT",
+                  "TRACKER_LOST",
+                  "TRACKER_OVERFLOWED",
+                  "TRACKER_UNAVAILABLE",
+                  "UNSAFE_PROCESS_GROUP"
+                ]
+              },
+              "stage": {
+                "$ref": "#/definitions/safeString"
+              },
+              "message": {
+                "$ref": "#/definitions/safeString"
+              },
+              "expected": {
+                "$ref": "#/definitions/safeValue"
+              },
+              "observed": {
+                "$ref": "#/definitions/safeValue"
+              },
+              "platform": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "arch",
+                  "os"
+                ],
+                "properties": {
+                  "os": {
+                    "const": "darwin"
+                  },
+                  "arch": {
+                    "const": "aarch64"
+                  }
+                }
+              },
+              "executablePath": {
+                "$ref": "#/definitions/safeString"
+              },
+              "method": {
+                "type": "string"
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "stderr": {
+                "$ref": "#/definitions/safeString"
+              },
+              "nextAction": {
+                "$ref": "#/definitions/safeString"
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "escapedDescendantContainmentProven": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "containmentCapability": {
+                "properties": {
+                  "available": {
+                    "const": true
+                  },
+                  "armedBeforeChildExecution": {
+                    "const": true
+                  },
+                  "continuouslyTracked": {
+                    "const": true
+                  },
+                  "creationEventsCovered": {
+                    "const": true
+                  },
+                  "sessionEscapeCovered": {
+                    "const": true
+                  },
+                  "reparentingCovered": {
+                    "const": true
+                  },
+                  "lossDetected": {
+                    "const": false
+                  },
+                  "overflowed": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
     "acceptanceSummary": {
       "type": "object",
       "additionalProperties": false,
@@ -558,19 +932,7 @@
           }
         },
         "shutdown": {
-          "type": "object",
-          "required": [
-            "escapedDescendantContainmentProven",
-            "noObservedDescendantsRemain"
-          ],
-          "properties": {
-            "noObservedDescendantsRemain": {
-              "type": "boolean"
-            },
-            "escapedDescendantContainmentProven": {
-              "type": "boolean"
-            }
-          }
+          "$ref": "#/definitions/shutdownEvidence"
         },
         "gates": {
           "type": "object",
@@ -578,7 +940,6 @@
           "required": [
             "authenticatedTurnCompleted",
             "coverageComplete",
-            "escapedDescendantContainmentProven",
             "everyRetainedEnvelopeSchemaValid",
             "exactVersions",
             "generatedArtifactsMatch",
@@ -605,10 +966,7 @@
               "type": "boolean"
             },
             "noObservedDescendantsRemain": {
-              "type": "boolean"
-            },
-            "escapedDescendantContainmentProven": {
-              "type": "boolean"
+              "const": true
             }
           }
         }

@@ -267,7 +267,7 @@ Deno.test("owned-session setup failure is bounded and reaps its launcher child",
   assertEquals(await processRecord(observed.rootPid!), undefined);
 });
 
-Deno.test("unavailable, delayed, lost, and overflowed trackers remain typed blockers", () => {
+Deno.test("unavailable, delayed, lost, and overflowed trackers remain typed containment limitations", () => {
   assertEquals(
     containmentBlockerCode(SNAPSHOT_ONLY_CAPABILITY),
     "TRACKER_UNAVAILABLE",
@@ -297,7 +297,7 @@ Deno.test("unavailable, delayed, lost, and overflowed trackers remain typed bloc
   );
 });
 
-Deno.test("concurrent graceful close calls share one promise and fail closed on containment", async () => {
+Deno.test("concurrent graceful close calls share one clean observed-tree result", async () => {
   const hookCalls = {
     stopNewWork: 0,
     settlePending: 0,
@@ -321,19 +321,35 @@ Deno.test("concurrent graceful close calls share one promise and fail closed on 
   const first = host.close();
   const second = host.close();
   assert(first === second, "host close did not return its memoized promise");
-  const firstError = await assertShutdownError(first, "TRACKER_UNAVAILABLE");
-  const secondError = await assertShutdownError(second, "TRACKER_UNAVAILABLE");
-  assert(firstError === secondError, "close callers did not share one error");
+  const firstResult = await first;
+  const secondResult = await second;
   assert(
-    firstError.evidence === secondError.evidence,
+    firstResult === secondResult,
+    "close callers did not share one result",
+  );
+  assert(firstResult.shutdown);
+  assert(
+    firstResult.shutdown === secondResult.shutdown,
     "close callers did not share one evidence object",
   );
-  assertEquals(firstError.evidence.signalPath, ["stdin-close"]);
-  assertEquals(firstError.evidence.directExit?.success, true);
-  assertEquals(firstError.evidence.noObservedDescendantsRemain, true);
-  assertEquals(firstError.evidence.escapedDescendantContainmentProven, false);
-  assertEquals(firstError.evidence.containmentCapability.available, false);
-  assertEquals(firstError.evidence.drains, {
+  const evidence = firstResult.shutdown;
+  assertEquals(evidence.signalPath, ["stdin-close"]);
+  assertEquals(evidence.directExit?.success, true);
+  assertEquals(evidence.remainingPids, []);
+  assertEquals(evidence.noObservedDescendantsRemain, true);
+  assertEquals(evidence.escapedDescendantContainmentProven, false);
+  assertEquals(evidence.containmentCapability.available, false);
+  assert(
+    evidence.diagnostics.some((diagnostic) =>
+      diagnostic.code === "TRACKER_UNAVAILABLE"
+    ),
+  );
+  assert(
+    evidence.diagnostics.some((diagnostic) =>
+      diagnostic.code === "CONTAINMENT_UNPROVEN"
+    ),
+  );
+  assertEquals(evidence.drains, {
     stdoutCompleted: true,
     stderrCompleted: true,
   });
@@ -354,7 +370,7 @@ Deno.test("a never-settling preparation hook times out and cleanup continues", a
   );
   const error = await assertShutdownError(
     host.close(),
-    "TRACKER_UNAVAILABLE",
+    "GRACEFUL_SHUTDOWN_TIMEOUT",
   );
   assert(
     error.evidence.diagnostics.some((diagnostic) =>
@@ -379,31 +395,31 @@ Deno.test("ignored stdin escalates to verified process-group SIGTERM", async () 
   const { host, outputDone } = await spawnShutdownFixture(
     "ignore-stdin-close",
   );
-  const error = await assertShutdownError(
-    host.close(),
-    "TRACKER_UNAVAILABLE",
-  );
-  assertEquals(error.evidence.signalPath, ["stdin-close", "SIGTERM"]);
-  assertEquals(error.evidence.timedOutStages, ["graceful"]);
-  assertEquals(error.evidence.directExit?.signal, "SIGTERM");
-  assertEquals(error.evidence.remainingPids, []);
+  const result = await host.close();
+  assert(result.shutdown);
+  assertEquals(result.shutdown.signalPath, ["stdin-close", "SIGTERM"]);
+  assertEquals(result.shutdown.timedOutStages, ["graceful"]);
+  assertEquals(result.shutdown.directExit?.signal, "SIGTERM");
+  assertEquals(result.shutdown.remainingPids, []);
+  assertEquals(result.shutdown.noObservedDescendantsRemain, true);
+  assertEquals(result.shutdown.escapedDescendantContainmentProven, false);
   await outputDone;
 });
 
 Deno.test("ignored SIGTERM escalates to verified process-group SIGKILL", async () => {
   const { host, outputDone } = await spawnShutdownFixture("ignore-signals");
-  const error = await assertShutdownError(
-    host.close(),
-    "TRACKER_UNAVAILABLE",
-  );
-  assertEquals(error.evidence.signalPath, [
+  const result = await host.close();
+  assert(result.shutdown);
+  assertEquals(result.shutdown.signalPath, [
     "stdin-close",
     "SIGTERM",
     "SIGKILL",
   ]);
-  assertEquals(error.evidence.timedOutStages, ["graceful", "terminate"]);
-  assertEquals(error.evidence.directExit?.signal, "SIGKILL");
-  assertEquals(error.evidence.remainingPids, []);
+  assertEquals(result.shutdown.timedOutStages, ["graceful", "terminate"]);
+  assertEquals(result.shutdown.directExit?.signal, "SIGKILL");
+  assertEquals(result.shutdown.remainingPids, []);
+  assertEquals(result.shutdown.noObservedDescendantsRemain, true);
+  assertEquals(result.shutdown.escapedDescendantContainmentProven, false);
   await outputDone;
 });
 
@@ -416,14 +432,14 @@ Deno.test("ordinary grandchildren are observed and terminated with their owned g
     markers,
     configuration.compatibility.limits.gracefulExitMs,
   );
-  const error = await assertShutdownError(
-    host.close(),
-    "TRACKER_UNAVAILABLE",
-  );
+  const result = await host.close();
+  assert(result.shutdown);
   assertEquals(marker.kind, "ordinary");
-  assert(error.evidence.observedPids.includes(marker.pid));
-  assertEquals(error.evidence.signalPath, ["stdin-close", "SIGTERM"]);
-  assertEquals(error.evidence.remainingPids, []);
+  assert(result.shutdown.observedPids.includes(marker.pid));
+  assertEquals(result.shutdown.signalPath, ["stdin-close", "SIGTERM"]);
+  assertEquals(result.shutdown.remainingPids, []);
+  assertEquals(result.shutdown.noObservedDescendantsRemain, true);
+  assertEquals(result.shutdown.escapedDescendantContainmentProven, false);
   assertEquals(await processRecord(marker.pid), undefined);
   await outputDone;
 });
@@ -504,30 +520,18 @@ Deno.test("protocol failure, timeout, unexpected request, child exit, and cancel
     const first = client.close();
     const second = client.close();
     assert(first === second, `${testCase.mode} did not memoize client close`);
-    let firstError: ShutdownError | undefined;
-    try {
-      await first;
-    } catch (error) {
-      assert(error instanceof ShutdownError);
-      firstError = error;
-    }
-    assert(firstError);
+    const firstResult = await first;
+    const secondResult = await second;
+    assert(firstResult === secondResult);
+    assert(firstResult.shutdown);
+    assert(firstResult.shutdown === secondResult.shutdown);
+    assertEquals(firstResult.shutdown.remainingPids, []);
+    assertEquals(firstResult.shutdown.noObservedDescendantsRemain, true);
     assertEquals(
-      firstError.code,
-      "TRACKER_UNAVAILABLE",
-      `${testCase.mode} shutdown diagnostics ${
-        firstError.evidence.diagnostics.map((diagnostic) =>
-          `${diagnostic.code}@${diagnostic.stage}`
-        ).join(",")
-      }`,
+      firstResult.shutdown.escapedDescendantContainmentProven,
+      false,
     );
-    const secondError = await assertShutdownError(
-      second,
-      "TRACKER_UNAVAILABLE",
-    );
-    assert(firstError.evidence === secondError.evidence);
-    assertEquals(firstError.evidence.noObservedDescendantsRemain, true);
-    assertEquals(firstError.evidence.drains, {
+    assertEquals(firstResult.shutdown.drains, {
       stdoutCompleted: true,
       stderrCompleted: true,
     });
