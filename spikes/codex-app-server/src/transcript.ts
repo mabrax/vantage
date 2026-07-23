@@ -228,6 +228,7 @@ export class TranscriptValidationError extends Error {
 type ItemLifecycle = {
   type: string;
   startedAtWireIndex: number;
+  startedText?: string;
   deltaWireIndexes: number[];
   textDeltas: string[];
   completedAtWireIndex?: number;
@@ -268,6 +269,29 @@ function requiredString(
     );
   }
   return value;
+}
+
+function assertAgentTextReconstruction(
+  startedText: string,
+  textDeltas: readonly string[],
+  completedText: string,
+): string {
+  const deltaText = textDeltas.join("");
+  const reconstructed = `${startedText}${deltaText}`;
+  if (reconstructed !== completedText) {
+    throw new TranscriptValidationError(
+      "AGENT_TEXT_MISMATCH",
+      "started agent text and ordered deltas do not reconstruct the completed item",
+      {
+        startedTextLength: startedText.length,
+        deltaCount: textDeltas.length,
+        deltaTextLength: deltaText.length,
+        reconstructedTextLength: reconstructed.length,
+        completedTextLength: completedText.length,
+      },
+    );
+  }
+  return reconstructed;
 }
 
 export class LifecycleReducer {
@@ -349,9 +373,21 @@ export class LifecycleReducer {
           `item ${itemId} started more than once`,
         );
       }
+      const type = requiredString(item.type, "type", `${method}.item`);
+      let startedText: string | undefined;
+      if (type === "agentMessage") {
+        if (typeof item.text !== "string") {
+          throw new TranscriptValidationError(
+            "AGENT_TEXT_INVALID",
+            `${method}.item.text must be a string`,
+          );
+        }
+        startedText = item.text;
+      }
       this.#items.set(itemId, {
-        type: requiredString(item.type, "type", `${method}.item`),
+        type,
         startedAtWireIndex: wireIndex,
+        startedText,
         deltaWireIndexes: [],
         textDeltas: [],
       });
@@ -374,14 +410,11 @@ export class LifecycleReducer {
           );
         }
         const completedText = item.text;
-        const reconstructed = lifecycle.textDeltas.join("");
-        if (reconstructed !== completedText) {
-          throw new TranscriptValidationError(
-            "AGENT_TEXT_MISMATCH",
-            "ordered agent deltas do not reconstruct the completed item",
-            { reconstructed, completedText },
-          );
-        }
+        assertAgentTextReconstruction(
+          lifecycle.startedText ?? "",
+          lifecycle.textDeltas,
+          completedText,
+        );
         lifecycle.completedText = completedText;
       }
       return;
@@ -568,6 +601,130 @@ async function replacement(
   return `[redacted-${label}:sha256:${await sha256Hex(
     new TextEncoder().encode(value),
   )}]`;
+}
+
+type AgentTextRedactionLifecycle = {
+  startedText: string;
+  textDeltas: string[];
+  redactedSegments: string[];
+  completed: boolean;
+};
+
+async function redactAgentTextSegment(value: string): Promise<string> {
+  return value.length === 0 ? "" : await replacement("text-segment", value);
+}
+
+async function preserveRedactedAgentTextReconstruction(
+  method: string,
+  rawEnvelope: Record<string, unknown>,
+  redactedEnvelope: Record<string, unknown>,
+  items: Map<string, AgentTextRedactionLifecycle>,
+): Promise<void> {
+  if (
+    method !== "item/started" &&
+    method !== "item/agentMessage/delta" &&
+    method !== "item/completed"
+  ) {
+    return;
+  }
+  const rawParams = objectRecord(rawEnvelope.params, `${method}.params`);
+  const redactedParams = objectRecord(
+    redactedEnvelope.params,
+    `${method}.params`,
+  );
+
+  if (method === "item/started") {
+    const rawItem = objectRecord(rawParams.item, `${method}.params.item`);
+    if (rawItem.type !== "agentMessage") return;
+    const itemId = requiredString(rawItem.id, "id", `${method}.params.item`);
+    if (items.has(itemId)) {
+      throw new TranscriptValidationError(
+        "ITEM_START_DUPLICATE",
+        "agent item started more than once during transcript redaction",
+      );
+    }
+    if (typeof rawItem.text !== "string") {
+      throw new TranscriptValidationError(
+        "AGENT_TEXT_INVALID",
+        `${method}.params.item.text must be a string`,
+      );
+    }
+    const redactedStartedText = await redactAgentTextSegment(rawItem.text);
+    const redactedItem = objectRecord(
+      redactedParams.item,
+      `${method}.params.item`,
+    );
+    redactedItem.text = redactedStartedText;
+    items.set(itemId, {
+      startedText: rawItem.text,
+      textDeltas: [],
+      redactedSegments: [redactedStartedText],
+      completed: false,
+    });
+    return;
+  }
+
+  if (method === "item/agentMessage/delta") {
+    const itemId = requiredString(rawParams.itemId, "itemId", method);
+    const lifecycle = items.get(itemId);
+    if (lifecycle === undefined) {
+      throw new TranscriptValidationError(
+        "ITEM_NOT_STARTED",
+        "agent delta preceded its item start during transcript redaction",
+      );
+    }
+    if (lifecycle.completed) {
+      throw new TranscriptValidationError(
+        "ITEM_ALREADY_COMPLETED",
+        "agent delta followed item completion during transcript redaction",
+      );
+    }
+    if (typeof rawParams.delta !== "string") {
+      throw new TranscriptValidationError(
+        "AGENT_DELTA_INVALID",
+        "agent message delta must contain text",
+      );
+    }
+    const redactedDelta = await redactAgentTextSegment(rawParams.delta);
+    redactedParams.delta = redactedDelta;
+    lifecycle.textDeltas.push(rawParams.delta);
+    lifecycle.redactedSegments.push(redactedDelta);
+    return;
+  }
+
+  const rawItem = objectRecord(rawParams.item, `${method}.params.item`);
+  if (rawItem.type !== "agentMessage") return;
+  const itemId = requiredString(rawItem.id, "id", `${method}.params.item`);
+  const lifecycle = items.get(itemId);
+  if (lifecycle === undefined) {
+    throw new TranscriptValidationError(
+      "ITEM_NOT_STARTED",
+      "agent completion preceded its item start during transcript redaction",
+    );
+  }
+  if (lifecycle.completed) {
+    throw new TranscriptValidationError(
+      "ITEM_ALREADY_COMPLETED",
+      "agent item completed more than once during transcript redaction",
+    );
+  }
+  if (typeof rawItem.text !== "string") {
+    throw new TranscriptValidationError(
+      "AGENT_TEXT_INVALID",
+      `${method}.params.item.text must be a string`,
+    );
+  }
+  assertAgentTextReconstruction(
+    lifecycle.startedText,
+    lifecycle.textDeltas,
+    rawItem.text,
+  );
+  const redactedItem = objectRecord(
+    redactedParams.item,
+    `${method}.params.item`,
+  );
+  redactedItem.text = lifecycle.redactedSegments.join("");
+  lifecycle.completed = true;
 }
 
 export async function redactProtocolValue(
@@ -1153,6 +1310,7 @@ export async function redactAndValidateTranscript(
   assertRecordOrder(records);
   const pending = new Map<RequestId, string>();
   const pendingServerRequests = new Map<RequestId, string>();
+  const agentTextItems = new Map<string, AgentTextRedactionLifecycle>();
   const retained: RetainedProtocolRecord[] = [];
 
   for (const record of records) {
@@ -1250,6 +1408,7 @@ export async function redactAndValidateTranscript(
       );
     }
     const envelope = record.envelope;
+    const rawEnvelope = protocolEnvelope(envelope);
     let method: string;
     let direction: ProtocolDirection | "client-response";
     if (envelope.kind === "response") {
@@ -1258,14 +1417,14 @@ export async function redactAndValidateTranscript(
       validator.validateResponseEnvelope(
         "client-request",
         method,
-        responseEnvelope(envelope),
+        rawEnvelope,
       );
     } else {
       method = envelope.method;
       direction = envelope.kind === "server-notification"
         ? "server-notification"
         : "server-request";
-      validator.validateEnvelope(direction, protocolEnvelope(envelope));
+      validator.validateEnvelope(direction, rawEnvelope);
       if (envelope.kind === "server-request") {
         if (pendingServerRequests.has(envelope.id)) {
           throw new TranscriptValidationError(
@@ -1277,9 +1436,17 @@ export async function redactAndValidateTranscript(
       }
     }
     const redactedEnvelope = await redactProtocolValue(
-      protocolEnvelope(envelope),
+      rawEnvelope,
       options,
     ) as Record<string, unknown>;
+    if (envelope.kind === "server-notification") {
+      await preserveRedactedAgentTextReconstruction(
+        method,
+        rawEnvelope,
+        redactedEnvelope,
+        agentTextItems,
+      );
+    }
     if (envelope.kind === "response") {
       validator.validateResponseEnvelope(
         "client-request",

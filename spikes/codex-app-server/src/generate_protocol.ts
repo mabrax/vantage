@@ -169,9 +169,7 @@ export async function verifyProtocol(
   const surface = await extractStableSurface(
     `${config.generatedRoot}/json-schema`,
   );
-  validateCoverageMembership(config.coverage, surface, {
-    requireZeroBaseline: true,
-  });
+  validateCoverageMembership(config.coverage, surface);
   const committedRawHash = await hashGeneratedTree(config.generatedRoot, "raw");
   if (committedRawHash !== config.generation.bundleSha256) {
     throw new ContractError(

@@ -1,4 +1,5 @@
 import {
+  buildBaselineCoverage,
   deriveCoverageFromJournal,
   extractStableSurface,
   validateCoverageMembership,
@@ -26,6 +27,7 @@ import {
   redactProtocolValue,
   TranscriptRecorder,
   TranscriptValidationError,
+  validateLifecycleRecords,
 } from "../src/transcript.ts";
 
 function assert(
@@ -65,7 +67,7 @@ async function assertRejectsCode(
   throw new Error(`expected ${code}`);
 }
 
-function assertThrowsCode(operation: () => unknown, code: string): void {
+function assertThrowsCode(operation: () => unknown, code: string): Error {
   try {
     operation();
   } catch (error) {
@@ -75,7 +77,7 @@ function assertThrowsCode(operation: () => unknown, code: string): void {
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return;
+    return error;
   }
   throw new Error(`expected ${code}`);
 }
@@ -169,11 +171,12 @@ function itemStarted(
   reducer: LifecycleReducer,
   wireIndex: number,
   itemId = "item-native",
+  text = "",
 ): void {
   reducer.observeServerNotification("item/started", {
     threadId: "thread-native",
     turnId: "turn-native",
-    item: { type: "agentMessage", id: itemId, text: "" },
+    item: { type: "agentMessage", id: itemId, text },
     startedAtMs: 1,
   }, wireIndex);
 }
@@ -262,6 +265,27 @@ Deno.test("lifecycle reducer reconstructs ordered deltas and rejects impossible 
   }
   {
     const reducer = establishReducer();
+    itemStarted(reducer, 1, "item-native", "seeded ");
+    itemDelta(reducer, 2, "message");
+    itemCompleted(reducer, 3, "seeded message");
+    turnCompleted(reducer, 4);
+    assertEquals(
+      reducer.finish({ requireCompleted: true }).agentText,
+      "seeded message",
+    );
+  }
+  {
+    const reducer = establishReducer();
+    itemStarted(reducer, 1, "item-native", "already complete");
+    itemCompleted(reducer, 2, "already complete");
+    turnCompleted(reducer, 3);
+    assertEquals(
+      reducer.finish({ requireCompleted: true }).agentText,
+      "already complete",
+    );
+  }
+  {
+    const reducer = establishReducer();
     assertThrowsCode(() => itemDelta(reducer, 1, "early"), "ITEM_NOT_STARTED");
   }
   {
@@ -271,12 +295,22 @@ Deno.test("lifecycle reducer reconstructs ordered deltas and rejects impossible 
   }
   {
     const reducer = establishReducer();
-    itemStarted(reducer, 1);
+    itemStarted(reducer, 1, "item-native", "seeded ");
     itemDelta(reducer, 2, "text");
-    assertThrowsCode(
-      () => itemCompleted(reducer, 3, "different"),
+    const error = assertThrowsCode(
+      () => itemCompleted(reducer, 3, "semantically different"),
       "AGENT_TEXT_MISMATCH",
     );
+    assert(error instanceof TranscriptValidationError);
+    assertEquals(error.details, {
+      startedTextLength: 7,
+      deltaCount: 1,
+      deltaTextLength: 4,
+      reconstructedTextLength: 11,
+      completedTextLength: 22,
+    });
+    assert(!JSON.stringify(error.details).includes("seeded"));
+    assert(!JSON.stringify(error.details).includes("semantically different"));
   }
   {
     const reducer = establishReducer();
@@ -372,6 +406,115 @@ Deno.test("raw validation precedes deterministic schema-preserving redaction", a
   assertEquals(
     retained.map((record) => record.observationIndex),
     retained.map((_, index) => index),
+  );
+  const retainedLifecycle = validateLifecycleRecords(retained, {
+    threadId: result.threadId,
+    turnId: result.turnId,
+  });
+  assert(retainedLifecycle.agentText.length > 0);
+});
+
+Deno.test("segment-aware redaction preserves seeded agent-text reconstruction and rejects raw disagreement", async () => {
+  const [result, validator, evidenceSchema, configuration] = await Promise.all([
+    fullScenario(),
+    validatorPromise,
+    evidenceSchemaPromise,
+    configurationPromise,
+  ]);
+  const records = structuredClone(result.transcript) as ProtocolRecord[];
+  const notifications = records.flatMap((record) =>
+    record.direction === "server" &&
+      record.envelope?.kind === "server-notification"
+      ? [record.envelope]
+      : []
+  );
+  const started = notifications.find((envelope) =>
+    envelope.method === "item/started"
+  );
+  const deltas = notifications.filter((envelope) =>
+    envelope.method === "item/agentMessage/delta"
+  );
+  const completed = notifications.find((envelope) =>
+    envelope.method === "item/completed"
+  );
+  assert(started !== undefined);
+  assertEquals(deltas.length, 2);
+  assert(completed !== undefined);
+  const startedParams = started.params as Record<string, unknown>;
+  const startedItem = startedParams.item as Record<string, unknown>;
+  const firstDelta = deltas[0].params as Record<string, unknown>;
+  const secondDelta = deltas[1].params as Record<string, unknown>;
+  const completedParams = completed.params as Record<string, unknown>;
+  const completedItem = completedParams.item as Record<string, unknown>;
+  startedItem.text = "seeded ";
+  firstDelta.delta = "agent ";
+  secondDelta.delta = "message";
+  completedItem.text = "seeded agent message";
+
+  const rawLifecycle = validateLifecycleRecords(records, {
+    threadId: result.threadId,
+    turnId: result.turnId,
+  });
+  assertEquals(rawLifecycle.agentText, "seeded agent message");
+  const retained = await redactAndValidateTranscript(
+    records,
+    validator,
+    evidenceSchema,
+    {
+      sensitivePaths: [
+        scenarioRepositoryPath(records),
+        configuration.repositoryRoot,
+      ],
+      rawTexts: ["seeded ", "agent ", "message", "seeded agent message"],
+    },
+  );
+  const retainedLifecycle = validateLifecycleRecords(retained, {
+    threadId: result.threadId,
+    turnId: result.turnId,
+  });
+  assert(retainedLifecycle.agentText.length > 0);
+  const retainedText = retainedLifecycle.agentText;
+  assert(retainedText.includes("[redacted-text-segment:sha256:"));
+  assert(!retainedText.includes("seeded"));
+  assert(!retainedText.includes("agent"));
+  assert(!retainedText.includes("message"));
+  const retainedAgain = await redactAndValidateTranscript(
+    records,
+    validator,
+    evidenceSchema,
+    {
+      sensitivePaths: [
+        scenarioRepositoryPath(records),
+        configuration.repositoryRoot,
+      ],
+      rawTexts: ["seeded ", "agent ", "message", "seeded agent message"],
+    },
+  );
+  assertEquals(retainedAgain, retained);
+
+  const disagrees = structuredClone(records) as ProtocolRecord[];
+  const disagreeingCompletion = disagrees.find((record) =>
+    record.direction === "server" &&
+    record.envelope?.kind === "server-notification" &&
+    record.envelope.method === "item/completed"
+  );
+  assert(
+    disagreeingCompletion?.direction === "server" &&
+      disagreeingCompletion.envelope?.kind === "server-notification",
+  );
+  const disagreeingParams = disagreeingCompletion.envelope.params as Record<
+    string,
+    unknown
+  >;
+  (disagreeingParams.item as Record<string, unknown>).text =
+    "semantically different";
+  await assertRejectsCode(
+    redactAndValidateTranscript(
+      disagrees,
+      validator,
+      evidenceSchema,
+    ),
+    "AGENT_TEXT_MISMATCH",
   );
 });
 
@@ -665,12 +808,16 @@ Deno.test("schema-valid server-request responses are correlated, retained, and e
   const surface = await extractStableSurface(
     `${configuration.generatedRoot}/json-schema`,
   );
+  const baseline = buildBaselineCoverage(
+    surface,
+    configuration.generation.bundleSha256,
+  );
   const responseOnly = deriveCoverageFromJournal(
-    configuration.coverage,
+    baseline,
     surface,
     [response],
   );
-  assertEquals(responseOnly, configuration.coverage);
+  assertEquals(responseOnly, baseline);
 });
 
 Deno.test("server-request response retention rejects unmatched and unanswered request IDs", async () => {
@@ -747,12 +894,16 @@ Deno.test("coverage is derived from both journal directions without mutating bas
   const surface = await extractStableSurface(
     `${configuration.generatedRoot}/json-schema`,
   );
+  const baseline = buildBaselineCoverage(
+    surface,
+    configuration.generation.bundleSha256,
+  );
   const derived = deriveCoverageFromJournal(
-    configuration.coverage,
+    baseline,
     surface,
     retained,
   );
-  validateCoverageMembership(configuration.coverage, surface, {
+  validateCoverageMembership(baseline, surface, {
     requireZeroBaseline: true,
   });
   validateCoverageMembership(derived, surface);
@@ -776,7 +927,7 @@ Deno.test("coverage is derived from both journal directions without mutating bas
   await assertRejectsCode(
     Promise.resolve().then(() =>
       deriveCoverageFromJournal(
-        configuration.coverage,
+        baseline,
         surface,
         retained,
         disagrees,

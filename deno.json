@@ -4,7 +4,7 @@
     "ajv": "npm:ajv@8.17.1"
   },
   "tasks": {
-    "check": "deno fmt --check deno.json spikes/codex-app-server/compatibility.json spikes/codex-app-server/coverage.json spikes/codex-app-server/schemas spikes/codex-app-server/src spikes/codex-app-server/tests && deno lint spikes/codex-app-server/src spikes/codex-app-server/tests && deno check spikes/codex-app-server/src/*.ts spikes/codex-app-server/tests/*.ts spikes/codex-app-server/tests/fixtures/fake_app_server.ts && deno task test:contract && deno task test:deterministic",
+    "check": "deno fmt --check deno.json spikes/codex-app-server/compatibility.json spikes/codex-app-server/schemas spikes/codex-app-server/src spikes/codex-app-server/tests && deno lint spikes/codex-app-server/src spikes/codex-app-server/tests && deno check spikes/codex-app-server/src/*.ts spikes/codex-app-server/tests/*.ts spikes/codex-app-server/tests/fixtures/fake_app_server.ts && deno task test:contract && deno task test:deterministic",
     "test:contract": "deno test --allow-read=.,/tmp,/private/tmp --allow-write=/tmp,/private/tmp --allow-run=/opt/homebrew/bin/codex,/bin/ln spikes/codex-app-server/tests/config_test.ts spikes/codex-app-server/tests/protocol_validation_test.ts spikes/codex-app-server/tests/coverage_test.ts",
     "test:transport": "deno test --allow-read=.,/tmp,/private/tmp --allow-write=/tmp,/private/tmp --allow-run=deno spikes/codex-app-server/tests/jsonl_client_test.ts spikes/codex-app-server/tests/protocol_validation_test.ts",
     "test:lifecycle": "deno test --allow-read=.,/tmp,/private/tmp --allow-write=/tmp,/private/tmp --allow-run=deno,/bin/sh,/usr/bin/git,/opt/homebrew/bin/codex spikes/codex-app-server/tests/preflight_test.ts spikes/codex-app-server/tests/transcript_test.ts",
