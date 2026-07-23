@@ -6,15 +6,15 @@
 - Structure outline: `.rpi/tasks/gh-issue-1-spike-pinned-deno-desktop-and/07-structure-outline.md`
 - Task branch: `rpi/gh-issue-1-spike-pinned-deno-desktop-and`
 - Supervisor status: `running`
-- Current phase: `4`
-- Last updated: `2026-07-23T17:33:50-04:00`
+- Current phase: `5`
+- Last updated: `2026-07-23T17:47:32-04:00`
 
 | Phase | Status | Codex task | Checkpoint commit | Notes |
 |---|---|---|---|---|
 | 1 | `completed` | initial `019f8fea-c453-7e10-afd0-42df3552bf4a`; correction `019f8ff3-471a-7832-8f41-d9ddf46e35d1`; retry `019f8ffc-855a-7361-bdec-edc9b8bcc04f` | `fa4144f49ff816a31d18fe0a4ea1b5a1b1661f1a` | All Phase 1 gates passed; 16/16 contract tests |
 | 2 | `completed` | `019f901b-6f54-7782-acf5-87344acb8bf4` | `7dde1239a0faa8ea1501d5f011083a5dc492eaa5` | Bounded bidirectional JSONL transport; 21/21 tests |
 | 3 | `completed` | `019f903b-ef57-7eb0-9093-4847309163c5` | `2be6613ed72c9c1d494c471ed888817710d25a80` | Offline lifecycle/evidence gate; 20/20 tests |
-| 4 | `retrying` | initial `019f9067-dad2-79a3-9c27-5f094145c94a`; plan correction `019f90d5-c594-7d73-89ec-61bb4fd92ce2` | `2b58fc5f682786007c90cba2cb435178601b4e0b` | Retry against revised bounded observed-tree shutdown gate; immediate `setsid` remains a documented fail-closed limitation |
+| 4 | `completed` | initial `019f9067-dad2-79a3-9c27-5f094145c94a`; plan correction `019f90d5-c594-7d73-89ec-61bb4fd92ce2`; retry `019f90e6-a4a4-7343-9cd8-d79b1213c1aa` | `5d7810ac87f97dae29841ecb7fc464849ad798ae` | Revised gate passed: 12/12 shutdown tests, empty remaining PIDs, settled direct status and drains; immediate `setsid` remains a documented fail-closed limitation |
 | 5 | `pending` | — | — | Requires completed Phase 4 |
 | 6 | `pending` | — | — | Requires completed Phases 4 and 5 |
 
