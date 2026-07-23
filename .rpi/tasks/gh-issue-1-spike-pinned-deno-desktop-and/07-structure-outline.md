@@ -41,7 +41,7 @@ This spike creates runtime compatibility evidence and actionable CLI diagnostics
 - [ ] Phase 2: Prove bounded bidirectional JSONL transport over a real child process
 - [ ] Phase 3: Prove preflight, lifecycle, transcript, and coverage behavior offline
 - [ ] Phase 4: Prove bounded shutdown and escaped-descendant containment fail-closed
-- [ ] Phase 5: Complete the authenticated compatibility run in verify-only mode
+- [x] Phase 5: Complete the authenticated compatibility run in verify-only mode
 - [ ] Phase 6: Publish and re-verify one atomic acceptance proof set
 
 ---

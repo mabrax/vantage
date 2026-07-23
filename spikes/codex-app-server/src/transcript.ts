@@ -1,10 +1,15 @@
 import type { TransportDiagnostic } from "./diagnostics.ts";
-import { sha256Hex } from "./config.ts";
+import {
+  type CoverageManifest,
+  type RegenerationVerifiedConfiguration,
+  sha256Hex,
+} from "./config.ts";
 import {
   type ProtocolDirection,
   ProtocolValidator,
   validateJsonAgainstSchema,
 } from "./protocol_validation.ts";
+import type { ShutdownEvidence } from "./shutdown.ts";
 
 export type RequestId = string | number;
 
@@ -146,6 +151,44 @@ export type NativeIds = {
 export type RetainedProtocolRecord = ProtocolRecord & {
   schema: { id: string; valid: true };
   nativeIds: NativeIds;
+};
+
+export type LiveMeasurements = {
+  spawnToInitializeResponse: number;
+  initializeToReady: number;
+  turnStartToFirstEvent: number;
+  turnStartToCompleted: number;
+  stdinCloseToExit: number;
+  totalShutdown: number;
+};
+
+export type VerifyOnlyCandidate = {
+  transcript: readonly RetainedProtocolRecord[];
+  coverage: CoverageManifest;
+  summaryInputs: {
+    versions: { deno: "2.9.3"; codex: "0.145.0" };
+    platform: { os: "darwin"; arch: "aarch64" };
+    observationsMs: LiveMeasurements;
+    lifecycle: {
+      stdoutLines: number;
+      stderrBytes: number;
+      threadId: string;
+      turnId: string;
+      terminalStatus: "completed";
+      completedItems: number;
+      completedAgentMessages: number;
+    };
+    shutdown: ShutdownEvidence;
+    gates: {
+      exactVersions: true;
+      generatedArtifactsMatch: true;
+      coverageComplete: true;
+      everyRetainedEnvelopeSchemaValid: true;
+      lifecycleOrdered: true;
+      authenticatedTurnCompleted: true;
+      noObservedDescendantsRemain: true;
+    };
+  };
 };
 
 export class TranscriptValidationError extends Error {
@@ -492,6 +535,8 @@ const TEXT_KEY =
 const PATH_KEY =
   /(?:codexHome|cwd|homePath|instructionSources|path|repositoryPath)$/i;
 const DIRECT_HOME_PATH = /^(?:\/Users\/|\/home\/)/;
+const CREDENTIAL_VALUE =
+  /(?:\bBearer\s+[A-Za-z0-9._~+/=-]+|\bsk-[A-Za-z0-9_-]{16,}|\b(?:access|refresh|auth|id)[_-]?token\s*[:=]\s*\S+)/i;
 
 async function replacement(
   label: string,
@@ -573,6 +618,237 @@ export async function redactProtocolValue(
     return result;
   }
   return value;
+}
+
+function collectAccountIdentifiers(
+  value: unknown,
+  key = "",
+  result = new Set<string>(),
+): ReadonlySet<string> {
+  if (
+    (typeof value === "string" || typeof value === "number") &&
+    ACCOUNT_IDENTIFIER_KEY.test(key)
+  ) {
+    result.add(String(value));
+  } else if (Array.isArray(value)) {
+    for (const entry of value) collectAccountIdentifiers(entry, key, result);
+  } else if (value !== null && typeof value === "object") {
+    for (const [entryKey, entry] of Object.entries(value)) {
+      collectAccountIdentifiers(entry, entryKey, result);
+    }
+  }
+  return result;
+}
+
+function assertSensitiveValuesAbsent(
+  value: unknown,
+  options: {
+    sensitivePaths: readonly string[];
+    rawTexts: readonly string[];
+    account: Record<string, unknown>;
+  },
+): void {
+  const encoded = JSON.stringify(value);
+  const forbidden = [
+    ...options.sensitivePaths,
+    ...options.rawTexts,
+    ...collectAccountIdentifiers(options.account),
+  ];
+  for (const sensitive of forbidden) {
+    if (sensitive.length > 0 && encoded.includes(sensitive)) {
+      throw new TranscriptValidationError(
+        "SENSITIVE_VALUE_RETAINED",
+        "verify-only candidate data contains a supplied sensitive value",
+      );
+    }
+  }
+  if (/(?:\/Users\/|\/home\/)/.test(encoded)) {
+    throw new TranscriptValidationError(
+      "DIRECT_HOME_PATH_RETAINED",
+      "verify-only candidate data contains a direct home path",
+    );
+  }
+  if (CREDENTIAL_VALUE.test(encoded)) {
+    throw new TranscriptValidationError(
+      "CREDENTIAL_VALUE_REJECTED",
+      "verify-only candidate data contains credential-like material",
+    );
+  }
+}
+
+function requireMeasurement(name: string, value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new TranscriptValidationError(
+      "MEASUREMENT_INVALID",
+      `${name} must be a non-negative monotonic observation`,
+      { name },
+    );
+  }
+  return value;
+}
+
+export function buildVerifyOnlyCandidate(options: {
+  configuration: RegenerationVerifiedConfiguration;
+  lifecycle: LifecycleResult;
+  measurements: Omit<
+    LiveMeasurements,
+    "stdinCloseToExit" | "totalShutdown"
+  >;
+  retained: readonly RetainedProtocolRecord[];
+  coverage: CoverageManifest;
+  shutdown: ShutdownEvidence;
+  stderrBytes: number;
+  stderrText: string;
+  evidenceSchema: unknown;
+  account: Record<string, unknown>;
+  sensitivePaths: readonly string[];
+  rawTexts: readonly string[];
+}): VerifyOnlyCandidate {
+  const shutdown = options.shutdown;
+  if (
+    shutdown.directExit === undefined ||
+    shutdown.drains.stdoutCompleted !== true ||
+    shutdown.drains.stderrCompleted !== true ||
+    shutdown.remainingPids.length !== 0 ||
+    shutdown.noObservedDescendantsRemain !== true
+  ) {
+    throw new TranscriptValidationError(
+      "SHUTDOWN_GATE_FAILED",
+      "verify-only eligibility requires settled status/drains and an empty observed tree",
+      {
+        directExitSettled: shutdown.directExit !== undefined,
+        drains: shutdown.drains,
+        remainingPids: shutdown.remainingPids,
+        noObservedDescendantsRemain: shutdown.noObservedDescendantsRemain,
+      },
+    );
+  }
+  if (typeof shutdown.escapedDescendantContainmentProven !== "boolean") {
+    throw new TranscriptValidationError(
+      "CONTAINMENT_FACT_MISSING",
+      "escaped-descendant containment must remain an explicit evidence fact",
+    );
+  }
+  const escapedDescendantContainmentProven = Boolean(
+    shutdown.escapedDescendantContainmentProven,
+  );
+  if (escapedDescendantContainmentProven) {
+    const capability = shutdown.containmentCapability;
+    if (
+      !capability.available || !capability.armedBeforeChildExecution ||
+      !capability.continuouslyTracked || !capability.creationEventsCovered ||
+      !capability.sessionEscapeCovered || !capability.reparentingCovered ||
+      capability.lossDetected || capability.overflowed
+    ) {
+      throw new TranscriptValidationError(
+        "CONTAINMENT_PROOF_UNSUPPORTED",
+        "escaped-descendant containment cannot be true without race-closing capability evidence",
+      );
+    }
+  }
+  const stdinClosedAt = shutdown.timings.stdinClosedAtMs;
+  const directExitAt = shutdown.timings.directExitAtMs;
+  if (stdinClosedAt === undefined || directExitAt === undefined) {
+    throw new TranscriptValidationError(
+      "MEASUREMENT_RECORD_MISSING",
+      "shutdown must record stdin close and direct exit observations",
+    );
+  }
+  const observationsMs: LiveMeasurements = {
+    spawnToInitializeResponse: requireMeasurement(
+      "spawnToInitializeResponse",
+      options.measurements.spawnToInitializeResponse,
+    ),
+    initializeToReady: requireMeasurement(
+      "initializeToReady",
+      options.measurements.initializeToReady,
+    ),
+    turnStartToFirstEvent: requireMeasurement(
+      "turnStartToFirstEvent",
+      options.measurements.turnStartToFirstEvent,
+    ),
+    turnStartToCompleted: requireMeasurement(
+      "turnStartToCompleted",
+      options.measurements.turnStartToCompleted,
+    ),
+    stdinCloseToExit: requireMeasurement(
+      "stdinCloseToExit",
+      directExitAt - stdinClosedAt,
+    ),
+    totalShutdown: requireMeasurement(
+      "totalShutdown",
+      shutdown.timings.totalMs,
+    ),
+  };
+  const evidence = options.evidenceSchema as Record<string, unknown>;
+  validateJsonAgainstSchema(
+    {
+      $schema: evidence.$schema,
+      definitions: evidence.definitions,
+      $ref: "#/definitions/shutdownEvidence",
+    },
+    shutdown,
+    "SHUTDOWN_EVIDENCE_SCHEMA_INVALID",
+  );
+  if (
+    options.lifecycle.terminalStatus !== "completed" ||
+    options.lifecycle.completedAgentMessages < 1 ||
+    options.lifecycle.agentText.length === 0
+  ) {
+    throw new TranscriptValidationError(
+      "AUTHENTICATED_TURN_INCOMPLETE",
+      "verify-only eligibility requires one completed turn with agent content",
+    );
+  }
+  if (
+    options.retained.some((record) =>
+      record.schema.valid !== true || record.schema.id.length === 0
+    )
+  ) {
+    throw new TranscriptValidationError(
+      "RETAINED_SCHEMA_PROOF_MISSING",
+      "every verify-only record must retain a pinned schema proof",
+    );
+  }
+  const candidate: VerifyOnlyCandidate = {
+    transcript: options.retained,
+    coverage: options.coverage,
+    summaryInputs: {
+      versions: { deno: "2.9.3", codex: "0.145.0" },
+      platform: { os: "darwin", arch: "aarch64" },
+      observationsMs,
+      lifecycle: {
+        stdoutLines:
+          options.retained.filter((record) => record.direction === "server")
+            .length,
+        stderrBytes: options.stderrBytes,
+        threadId: options.lifecycle.threadId,
+        turnId: options.lifecycle.turnId,
+        terminalStatus: "completed",
+        completedItems: options.lifecycle.completedItems,
+        completedAgentMessages: options.lifecycle.completedAgentMessages,
+      },
+      shutdown,
+      gates: {
+        exactVersions: true,
+        generatedArtifactsMatch: true,
+        coverageComplete: true,
+        everyRetainedEnvelopeSchemaValid: true,
+        lifecycleOrdered: true,
+        authenticatedTurnCompleted: true,
+        noObservedDescendantsRemain: true,
+      },
+    },
+  };
+  assertSensitiveValuesAbsent(
+    { candidate, stderr: options.stderrText },
+    {
+      sensitivePaths: options.sensitivePaths,
+      rawTexts: options.rawTexts,
+      account: options.account,
+    },
+  );
+  return candidate;
 }
 
 function clientEnvelope(record: ClientProtocolRecord): Record<string, unknown> {
