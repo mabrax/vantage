@@ -2,119 +2,100 @@
 
 [GitHub milestone](https://github.com/mabrax/vantage/milestone/1)
 
-This milestone delivers a packaged Deno Desktop experience in which a developer can register a
-local Git project and carry on a real, resumable Codex conversation. This document is the shared
-orientation view: the GitHub milestone owns the product outcome, issues own implementation slices,
-and the [architecture documents](../architecture/README.md) own design detail.
+This milestone delivers a packaged Vantage app in which a developer can point at one local Git
+repository and hold a real, read-only Codex conversation during the open app session. This document
+is the shared orientation view: the GitHub milestone owns the product outcome, issues own
+implementation slices, and the [architecture documents](../architecture/README.md) own design
+detail.
 
 ## Map
 
 ```mermaid
 flowchart LR
-    CONTRACT["Pinned runtime and protocol contract<br/>#1"]
+    USER["Developer"]
 
     subgraph DESKTOP["Vantage desktop"]
-        SHELL["Desktop shell and typed gateway<br/>#2"]
-        STORE[("SQLite projection and event log<br/>#3")]
-        PROJECTS["Project registry and sidebar<br/>#4"]
-        CATALOG["Codex preflight and model controls<br/>#5"]
-        THREADS["Durable thread lifecycle<br/>#6"]
-        TURNS["Streaming turns, activity, and interruption<br/>#7"]
-        BLOCKING["Approvals and user input<br/>#8"]
-        EXIT["Recovery, shutdown, and packaged acceptance<br/>#9"]
+        PROJECT["Select one local Git repository<br/>#2"]
+        TURN["Ask once and stream the answer<br/>#2"]
+        CONVERSATION["Follow up and stop<br/>#6"]
 
-        SHELL --> STORE
-        STORE --> PROJECTS
-        STORE --> CATALOG
-        PROJECTS --> THREADS
-        CATALOG --> THREADS
-        THREADS --> TURNS
-        TURNS --> BLOCKING
-        BLOCKING --> EXIT
+        PROJECT --> TURN --> CONVERSATION
     end
 
-    CONTRACT --> SHELL
-    CONTRACT --> CATALOG
-
     CODEX["codex app-server"]
-    REPO[("Selected Git project")]
-    HOME[("CODEX_HOME")]
+    REPO[("Selected Git repository")]
     SERVICE["OpenAI Codex service"]
 
-    CATALOG --> CODEX
-    THREADS <--> CODEX
-    TURNS <--> CODEX
-    BLOCKING <--> CODEX
+    USER --> PROJECT
+    TURN <--> CODEX
+    CONVERSATION <--> CODEX
     CODEX <--> REPO
-    CODEX <--> HOME
     CODEX <--> SERVICE
 
-    FILES["Files and terminal vertical<br/>future — not scheduled"]
-    WORK["Tasks and flow vertical<br/>future — not scheduled"]
-    PROVIDERS["Provider abstraction<br/>future — after the abstraction gate"]
+    SAVED["Saved projects and restart/resume<br/>future — not scheduled"]
+    CONTROLS["Model and runtime controls<br/>future — not scheduled"]
+    BLOCKING["Approvals and structured input<br/>future — not scheduled"]
+    SURFACES["Files, terminal, tasks, and flow<br/>future — not scheduled"]
+    PROVIDERS["Provider abstraction<br/>future — not scheduled"]
 
-    EXIT -.-> FILES
-    EXIT -.-> WORK
-    EXIT -.-> PROVIDERS
+    CONVERSATION -.-> SAVED
+    CONVERSATION -.-> CONTROLS
+    CONVERSATION -.-> BLOCKING
+    CONVERSATION -.-> SURFACES
+    CONVERSATION -.-> PROVIDERS
 
     classDef future stroke-dasharray: 4 3,opacity:0.65;
-    class FILES,WORK,PROVIDERS future;
+    class SAVED,CONTROLS,BLOCKING,SURFACES,PROVIDERS future;
 ```
 
 ## Issue map
 
 | Node or concern | Owning issue |
 | --- | --- |
-| Runtime and native protocol compatibility contract | [#1 — Spike pinned Deno Desktop and Codex app-server compatibility](https://github.com/mabrax/vantage/issues/1) |
-| Packaged shell, WebView boundary, typed commands, snapshots, and ordered local stream | [#2 — Bootstrap the packaged Deno Desktop shell and typed host gateway](https://github.com/mabrax/vantage/issues/2) |
-| Durable Vantage state, projection transactions, and application event sequence | [#3 — Implement the SQLite persistence worker and ordered application event log](https://github.com/mabrax/vantage/issues/3) |
-| Validated local project registration and sidebar navigation | [#4 — Build persistent project registration and sidebar navigation](https://github.com/mabrax/vantage/issues/4) |
-| Codex availability, account state, catalog, and model/runtime controls | [#5 — Implement Codex preflight, account state, and model controls](https://github.com/mabrax/vantage/issues/5) |
-| Vantage/native thread identity and disposable live-session lifecycle | [#6 — Implement durable project-scoped Codex thread lifecycle](https://github.com/mabrax/vantage/issues/6) |
-| Turn submission, ordered projection, truthful activity, and interruption | [#7 — Implement text turns, streaming chat, activity projection, and interruption](https://github.com/mabrax/vantage/issues/7) |
-| Connection-owned approvals and structured user-input requests | [#8 — Implement Codex approvals and structured user-input requests](https://github.com/mabrax/vantage/issues/8) |
-| Restart reconciliation, bounded cleanup, operational limits, and exit proof | [#9 — Complete restart recovery, shutdown cleanup, and packaged vertical-slice acceptance](https://github.com/mabrax/vantage/issues/9) |
-| Standalone files and terminal workspace | Future vertical — not scheduled |
-| Tasks and interactive flow view | Future vertical — not scheduled |
-| Provider comparison and possible abstraction | Future architecture discussion — only after the abstraction gate |
+| Packaged window, one validated repository, one real prompt, and streamed answer | [#2 — Ask Codex about one local repository in Vantage](https://github.com/mabrax/vantage/issues/2) |
+| Same-session follow-up, visible transcript, and stop | [#6 — Continue and stop the Codex conversation in the open app](https://github.com/mabrax/vantage/issues/6) |
+| Saved projects, threads, and restart/resume | Future vertical — not scheduled |
+| Model, reasoning, profile, and runtime controls | Future vertical — not scheduled |
+| Approvals, structured input, and write-enabled work | Future vertical — not scheduled |
+| Rich tool activity, files, terminal, tasks, and flow | Future vertical — not scheduled |
+| Provider comparison or abstraction | Future architecture discussion — not scheduled |
 
 ## Sequencing
 
 ```text
-#1 contract spike
- └─> #2 desktop shell
-      └─> #3 persistence and event log
-           ├─> #4 project registry ─┐
-           └─> #5 Codex catalog ───┴─> #6 thread lifecycle
-                                           └─> #7 turns and activity
-                                                └─> #8 blocking requests
-                                                     └─> #9 hardening and exit
+#2 first useful repository-scoped Codex turn
+ └─> #6 same-session conversation and stop
 ```
 
-Issue #1 freezes the runtime and native protocol contract. After #3, project registration (#4) and
-Codex catalog/model controls (#5) can proceed in parallel. Issue #9 is the milestone exit issue and
-waits for every product path through its dependency chain.
+Issue #2 collapses the minimum desktop, repository, Codex, UI, and acceptance path because none of
+those pieces has independent user value. Issue #6 waits for that path, then adds the smallest
+capability that turns a one-shot answer into a controllable conversation.
 
 ## Invariants
 
-- The WebView never receives Codex credentials, launches child processes, or speaks the native
-  app-server protocol.
-- A Vantage thread remains bound to one registered project and one compatible `CODEX_HOME`
-  continuation domain.
-- The native Codex thread ID is the conversation resume identity; Vantage never reconstructs a
-  native conversation by replaying its UI projection.
-- Native message order is preserved through durable projection, and non-coalescible lifecycle
-  activity is never silently dropped.
-- Only one turn may be active per thread, and uncertain submission is never replayed automatically.
-- Pending approvals and user-input requests belong to the live connection that created them and can
-  be settled at most once.
-- Local paths and provider output remain untrusted input at every boundary.
-- Provider-neutral abstractions, standalone file or terminal surfaces, tasks, and flow views do not
-  enter this milestone.
+- Every issue ends in a packaged, consumer-visible demonstration; infrastructure is never a
+  standalone deliverable.
+- The milestone supports one selected local Git repository and one native Codex thread per open app
+  session.
+- Codex runs read-only for this milestone; Vantage does not expose approval or mutation paths.
+- The WebView never receives Codex credentials or launches privileged processes.
+- Only one turn is active at a time, and uncertain input is never submitted twice automatically.
+- Closing Vantage intentionally discards the conversation and terminates its native process.
+- The implementation validates only the native requests and events required by this conversation;
+  it does not generate or certify the complete Codex protocol.
+- Tests are limited to the behavioral checks needed to prove the packaged conversation and protect
+  repository scoping, duplicate submission, and process cleanup.
+
+## Budget and kill criterion
+
+The vertical is capped at five focused implementation days: three for #2 and two for #6. If a
+packaged app cannot complete one real, read-only, repository-scoped Codex turn by the end of day two,
+stop and re-evaluate the desktop/runtime path. Do not use the remaining budget to build additional
+layers, proof publishers, or compatibility machinery.
 
 ## After this milestone
 
-The next architecture conversation selects the second product vertical from evidence recorded by
-the packaged Codex chat slice. Files and terminals, tasks and flow, and a future provider comparison
-remain candidates rather than commitments; nothing in this milestone implements them or introduces
-a speculative provider abstraction.
+The next product conversation asks whether real use of this session-only chat justifies a durable
+project and thread-resume vertical. Persistence, sidebars, model controls, blocking interactions,
+rich activity, other workspace surfaces, and provider abstraction remain unscheduled; nothing in
+this milestone implements them.

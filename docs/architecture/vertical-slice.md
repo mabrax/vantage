@@ -1,183 +1,140 @@
-# First vertical slice: Codex chat
+# First vertical slice: session-only Codex chat
 
-Status: **Accepted delivery boundary**
+Status: **Accepted interaction contract for Milestone 1**
 
-## Outcome
-
-The first vertical slice proves that Vantage can be the place where a developer opens a local Git
-project and has a real, resumable Codex conversation.
-
-At the end of the slice, a user can register a project in the sidebar, create or reopen a thread,
-choose an available Codex model, send a prompt, watch the answer and agent activity stream, respond
-when Codex blocks for input, interrupt a running turn, restart Vantage, and continue the thread.
-
-This is a product slice, not just a protocol demo. It crosses the desktop shell, UI, persistence,
-Codex process lifecycle, and recovery path.
+The [GitHub milestone](https://github.com/mabrax/vantage/milestone/1) owns the product outcome and
+vertical-level exclusions. The [milestone map](../milestones/01-codex-chat.md) owns issue
+sequencing and invariants. This document defines how the in-scope conversation behaves.
 
 ## Primary user journey
 
-1. Launch Vantage as a Deno Desktop application.
-2. See whether the local Codex CLI is supported and authenticated.
-3. Register a local Git repository by entering or pasting its path.
-4. Select the project from the sidebar.
-5. See its existing Vantage threads or create a new one.
-6. Choose a model and, where supported, a reasoning effort and runtime mode.
-7. Send a text prompt.
-8. See user text, streamed assistant text, turn state, and tool activity in order.
-9. Respond to an approval or structured user-input request if the turn produces one.
-10. Interrupt the turn if needed.
-11. Close and reopen the app, open the thread, and continue the native Codex conversation.
+1. Launch the packaged Vantage application on the primary development platform.
+2. Paste or type the path to one local Git repository.
+3. See an actionable state if the path is invalid or Codex is unavailable or unauthenticated.
+4. Start a session using the user's existing Codex defaults and fixed read-only access.
+5. Ask a question whose answer requires inspecting the selected repository.
+6. See the prompt, streamed assistant text, and a truthful terminal state.
+7. Ask a context-dependent follow-up in the same native conversation.
+8. Stop a response that is no longer useful and return to a usable prompt state.
+9. Close Vantage, ending the ephemeral conversation and its app-server process.
 
-## In scope
+## In-scope behavior
 
-### Desktop shell and project sidebar
+### Repository selection
 
-- package and launch through a pinned Deno Desktop version;
-- display registered projects in a persistent sidebar;
-- register a path only after canonicalizing it and verifying that it is an accessible Git
-  repository;
-- select one active project; and
-- remove a project from Vantage without deleting its repository.
+- Accept one typed or pasted local path before the conversation begins.
+- Canonicalize the path and verify it is an accessible Git repository.
+- Start no Codex process for an invalid path.
+- Keep the selected repository fixed after the native conversation begins.
 
-The first slice does not depend on a native folder picker because Deno Desktop does not currently
-provide one as a first-class API.
+There is no saved registry or sidebar. A new app session may select a different repository.
 
-### Codex preflight and controls
+### Codex readiness
 
-- discover a configured Codex executable;
-- reject unsupported Codex CLI versions with an actionable message;
-- read account/authentication state through app-server;
-- obtain the selectable model catalog from `model/list`;
-- persist the chosen model as the Vantage thread default;
-- show reasoning effort only when the selected model/schema supports it; and
-- expose a small set of named runtime modes rather than raw Codex flags.
+- Use a locally available Codex CLI and its existing authentication.
+- Use the existing default model rather than loading a catalog or presenting selectors.
+- Show a concise, retryable state when Codex is missing, cannot initialize, or requires
+  authentication.
+- Keep authentication outside Vantage.
 
-The app relies on the user's existing Codex CLI login. It does not implement OpenAI authentication.
+### First answer
 
-### Threads and chat
+- Start one native Codex thread scoped to the selected repository.
+- Submit one text prompt with fixed read-only access.
+- Render the user's prompt and assistant text as it arrives.
+- Show running, completed, interrupted, and failed states without inferring success from partial
+  text.
+- Prevent another submission while native acceptance is unresolved or the turn is active.
 
-- list Vantage threads for the selected project;
-- create a Vantage thread and native Codex thread;
-- lazily resume an existing native thread;
-- render the native thread history needed for continuity;
-- send one text turn at a time;
-- stream assistant text and ordered activity;
-- show running, completed, interrupted, failed, and recovery-needed states;
-- interrupt the active turn;
-- surface command, file-change, MCP, plan, error, and usage activity at least in a truthful generic
-  activity row when a richer renderer does not yet exist; and
-- prevent duplicate submission while send state is uncertain.
+### Same-session conversation
 
-### Blocking interaction
+- Reuse the same native thread for sequential prompts while Vantage remains open.
+- Preserve the visible chronological order of prompts, answers, and terminal states.
+- Re-enable prompt submission after completion, interruption, or a retryable failure.
+- Let the user stop an active response and keep interruption pending until Codex reports a terminal
+  state or the connection fails.
+- Never automatically resubmit uncertain user input.
 
-- show command and file-change approval requests with their relevant details;
-- approve, deny, or cancel exactly once;
-- show structured user-input requests and return the user's answer;
-- mark requests stale if their owning process exits; and
-- make it impossible for a late UI response to settle a different request.
+### Session end
 
-### Persistence and recovery
-
-- persist registered projects, Vantage thread metadata, native Codex IDs, selected controls, and the
-  UI projection;
-- load historical threads without eagerly starting child processes;
-- resume when the user opens or sends to a stopped thread;
-- reconcile the projection with `thread/read` after restart or uncertain process exit; and
-- never resend an uncertain turn automatically.
-
-## Explicitly out of scope
-
-- providers other than Codex;
-- a generic harness/provider adapter API;
-- project file browsing or editing as a standalone UI;
-- embedded terminals or PTYs;
-- task lists, Kanban, epics, or the flow view;
-- multiple simultaneous active turns in one thread;
-- automatic steering of a second prompt into a running turn;
-- thread fork, rollback, or archive UI;
-- image and file attachments;
-- application-specific MCP tools;
-- multi-agent handoffs;
-- cross-device synchronization; and
-- production auto-update or installer polish beyond what is needed to validate the packaged app.
-
-These remain possible follow-on slices. They must not shape a speculative framework around the chat
-implementation.
+- Treat the repository selection, transcript, and native thread as in-memory session state.
+- Terminate the Vantage-owned app-server process when the window closes.
+- Begin the next launch without implying that the prior conversation was saved or resumed.
 
 ## Interaction contract
 
-### Project selection
+### Repository truth
 
-Changing the selected project changes the visible thread list and the working-directory context for
-new or resumed Codex processes. A thread cannot silently move between projects.
+The canonical selected repository is the native working directory for every turn in the session. UI
+text cannot change that boundary, and invalid aliases or sibling paths do not authorize a different
+repository.
 
-### Model selection
+### Prompt truth
 
-The model selector is populated from Codex rather than a hard-coded list. The chosen value is stored
-with the Vantage thread and sent through the supported native request field. A model change applies
-only when no turn is active and must be visible before the next prompt is submitted.
+The UI distinguishes text entered by the user, native acceptance of a turn, streamed output, and the
+terminal outcome. The send control remains unavailable until starting another turn is safe.
 
-### Turn state
+### Transcript truth
 
-Only one turn may be active per thread. Sending is disabled while submission is unresolved. Stop
-maps to native interruption and remains visibly pending until Codex confirms completion or the
-connection fails.
+Visible user prompts and assistant text remain in native order. Milestone 1 does not require rich
+tool, plan, diff, usage, approval, or file-change renderers; ignored native activity must not be
+presented as fabricated assistant prose.
 
-### Activity presentation
+### Interruption truth
 
-The UI may begin with compact activity rows, but it cannot reduce all native activity to assistant
-text. At minimum, users can distinguish thinking/progress, tool execution, file change, approval,
-user input, error, and turn completion.
+Stop is a request, not an immediate success state. The UI stays pending until interruption,
+completion, or connection failure is known. After the terminal state, the same open conversation
+may accept another prompt.
 
-### Restart and resume
+### Failure and retry
 
-The sidebar and thread list render from Vantage state without launching Codex. Opening a thread
-starts a process only when native data or a new turn is needed. If native resume fails, the app shows
-the reason and never silently starts a replacement thread.
+Repository validation and Codex readiness failures are actionable and retryable. A failed or
+uncertain turn is never reported as completed or replayed automatically.
+
+## Explicitly out of scope
+
+- saved projects, a project sidebar, and multiple repositories;
+- saved threads, thread lists, restart/resume, and reconciliation;
+- SQLite, migrations, durable projections, replay cursors, and a generalized event log;
+- model, reasoning, profile, and runtime-mode selectors;
+- approvals, structured input, write-enabled work, and persistent policies;
+- rich tool activity, file-change views, attachments, and application-specific MCP tools;
+- embedded files, terminals, tasks, plans, and flow surfaces;
+- concurrent turns, prompt queues, steering, fork, rollback, archive, and handoff;
+- providers other than Codex and provider abstractions;
+- generated full-protocol artifacts, compatibility ranges, coverage certification, evidence
+  publishing, stress programs, and broad observability;
+- multi-platform support claims, installers, auto-update, and release polish.
+
+These exclusions are future verticals or not scheduled. They do not shape frameworks inside this
+slice.
 
 ## Acceptance scenarios
 
-The slice is complete only when these scenarios pass through the packaged Deno Desktop app:
+1. **Repository-grounded answer** — in the packaged app, select a temporary Git repository, ask a
+   question that requires inspecting it, watch assistant text stream, and reach a visible completed
+   state from a real authenticated Codex turn.
+2. **Contextual follow-up** — ask a second question that depends on the first exchange and confirm
+   the answer continues the same native conversation.
+3. **Interruption and reuse** — stop an active response, reach a truthful terminal state, and send
+   another prompt in the same open conversation.
+4. **Actionable prerequisites** — reject invalid and non-Git paths without launching Codex, and show
+   retryable missing-Codex and authentication-required states.
+5. **Session cleanup** — close the packaged app during idle and active work without leaving a
+   Vantage-owned app-server process running.
 
-1. **First conversation** — register a temporary Git repository, select a catalog model, create a
-   thread, send a prompt, observe streamed text, and reach a completed turn.
-2. **Restart and continue** — quit Vantage after a completed turn, relaunch it, reopen the thread,
-   ask a follow-up that depends on prior context, and confirm the same native Codex thread ID is used.
-3. **Interruption** — stop a running turn and reach a truthful terminal state without an orphaned
-   app-server process or an automatically repeated prompt.
-4. **Blocking request** — exercise at least one native approval or user-input request end to end and
-   reject a duplicate or stale response.
-5. **Model control** — show models returned by the pinned Codex CLI, persist a selection, and prove
-   that the selected model is used for the turn.
-6. **UI reconnect** — reconnect the event stream and recover from the last application sequence
-   without missing or duplicating visible activity.
-7. **Unsupported environment** — show useful states for missing Codex, unsupported CLI version,
-   unauthenticated account, missing repository, and unavailable native thread.
+Focused behavioral checks protect these scenarios. Tests are not separate milestone deliverables.
 
-## Build order
+## Delivery order
 
-1. **Protocol spike** — prove Deno can launch the pinned app-server, complete initialization and one
-   streamed turn, and terminate it cleanly.
-2. **Desktop skeleton** — package a minimal Deno Desktop window, typed binding, local SSE stream, and
-   SQLite database.
-3. **Project and catalog path** — add the sidebar, validated project registration, account preflight,
-   and model catalog.
-4. **Thread path** — create, list, open, start, and resume threads with durable ID mapping.
-5. **Turn path** — send text, project ordered notifications, render activity, interrupt, and complete.
-6. **Blocking requests** — add approval and structured user-input responses.
-7. **Recovery path** — add restart, reconciliation, stale-request behavior, and packaged acceptance
-   tests.
+1. [Issue #2](https://github.com/mabrax/vantage/issues/2) delivers the packaged repository selection
+   and first real streamed answer.
+2. [Issue #6](https://github.com/mabrax/vantage/issues/6) adds same-session follow-up and stop.
 
-Each step should leave an end-to-end path working; protocol behavior should not be replaced with
-mocked UI assumptions after the initial spike.
+Each issue ends in a user-visible packaged demonstration.
 
-## Evidence produced for the next slice
+## Budget and kill criterion
 
-The completed slice should leave behind:
-
-- a pinned Deno Desktop and Codex CLI compatibility pair;
-- a native method and event coverage manifest;
-- measured startup, resume, first-event, and shutdown behavior;
-- a record of WebView and platform limitations encountered;
-- real examples of projection and recovery behavior; and
-- a prioritized next-slice choice grounded in use rather than the original feature list.
+The complete vertical is capped at five focused implementation days. If a packaged app cannot
+complete one real, read-only, repository-scoped Codex turn by the end of day two, stop and
+re-evaluate the desktop/runtime path rather than adding infrastructure or proof machinery.
