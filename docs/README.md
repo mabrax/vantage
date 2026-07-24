@@ -9,9 +9,10 @@ the long-term idea visible without making every future surface a requirement of 
 | --- | --- | --- |
 | [Product foundation](FOUNDATION.md) | What should Vantage become, and why? | Low |
 | [Architecture overview](architecture/README.md) | How is the current system shaped? | Medium |
-| [First vertical slice](architecture/vertical-slice.md) | What are we proving first? | High |
-| [Codex app-server integration](architecture/codex-app-server.md) | How does Vantage speak to Codex? | Medium |
-| [Reliability and validation](architecture/reliability.md) | How will lifecycle, recovery, and tests work? | Medium |
+| [Milestone 1 map](milestones/01-codex-chat.md) | What is in the first product vertical and how is it sequenced? | High |
+| [First vertical slice](architecture/vertical-slice.md) | How should the session-only conversation behave? | High |
+| [Codex app-server integration](architecture/codex-app-server.md) | Which broader native capabilities may later extend the slice? | Medium |
+| [Reliability and validation](architecture/reliability.md) | Which persistence and recovery designs are explicitly deferred? | Medium |
 | [Decision log](architecture/decisions.md) | Which conflicting or uncertain choices were resolved? | Append-only |
 
 ## Authority and conflicts
@@ -19,7 +20,9 @@ the long-term idea visible without making every future surface a requirement of 
 The documents have different jobs rather than a single precedence order:
 
 - The product foundation owns the desired product direction and long-term surfaces.
-- The vertical-slice document owns the boundary and acceptance criteria of the current delivery.
+- The GitHub milestone owns the current delivery outcome and vertical-level exclusions.
+- The milestone map owns the vertical-wide view, sequencing, and invariants.
+- The vertical-slice document owns the current user journey and interaction contract.
 - The architecture documents own current technical implementation decisions.
 - The decision log explains why an older statement was superseded or why a provisional choice was
   made.

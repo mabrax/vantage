@@ -1,84 +1,60 @@
 # Architecture overview
 
-Status: **Accepted for the first vertical slice**, with provisional items called out below
+Status: **Accepted for the session-only Milestone 1**
 
-This document describes the system at a high level. The current delivery boundary is the
-[Codex chat vertical slice](vertical-slice.md). Native protocol mechanics are in
-[Codex app-server integration](codex-app-server.md), and operational detail is in
-[reliability and validation](reliability.md).
+This document owns the technical shape of the first implementation. The
+[milestone map](../milestones/01-codex-chat.md) owns the delivery boundary and sequencing; the
+[vertical-slice contract](vertical-slice.md) owns the user journey and behavior.
 
 ## Architectural outcome
 
-Vantage is a Deno Desktop application with a web UI and a privileged Deno host runtime. The Deno
-host owns local state, project access, and Codex child processes. The UI never launches Codex,
-handles credentials, or speaks the native app-server protocol directly.
+Vantage is a Deno Desktop application with a WebView UI and a privileged Deno host. During one open
+app session, the host validates one local Git repository, launches one `codex app-server`, keeps one
+native Codex thread in memory, and forwards the minimum conversation state needed by the UI.
 
-The first implementation is deliberately Codex-specific. Its job is to prove one complete,
-resumable chat experience before Vantage introduces a provider abstraction or builds the other
-product surfaces described in the foundation.
+The implementation uses the user's existing Codex installation, authentication, and default model.
+Codex is fixed to read-only access for this milestone. The UI never launches processes, reads Codex
+credentials, or speaks the native app-server protocol directly.
 
 ## Current decisions
 
-| Area | Decision | Status |
-| --- | --- | --- |
-| Desktop runtime | Deno Desktop, pinned to a validated Deno 2.9 patch release | Accepted |
-| Rendering backend | System WebView, with CEF retained as a compatibility fallback | Provisional |
-| UI framework | Not selected by this architecture | Open |
-| Provider | Codex through `codex app-server` | Accepted |
-| Provider abstraction | None until the abstraction gate is met | Accepted |
-| UI-to-host commands | Typed Deno Desktop bindings | Accepted |
-| Host-to-UI stream | Same-origin Server-Sent Events with resumable sequence IDs | Provisional |
-| App persistence | Local SQLite through `node:sqlite` in a dedicated persistence worker | Accepted |
-| Codex process topology | One child process per live Vantage thread | Provisional |
-| Codex authentication | Existing Codex CLI login and `CODEX_HOME` | Accepted |
-| Project registration | Validated path entry for the first slice | Provisional |
+| Area | Milestone 1 decision |
+| --- | --- |
+| Desktop runtime | Deno Desktop on the primary development platform |
+| UI boundary | WebView presentation with validated host commands and local streamed events |
+| Provider | Codex through one local `codex app-server` process |
+| Repository | One canonical, accessible Git repository selected by pasted or typed path |
+| Conversation | One native thread held only for the open app session |
+| Turns | Sequential text turns; one active turn at a time |
+| Model and profile | Existing Codex defaults and authentication |
+| Runtime policy | Fixed read-only access; no approval or mutation flow |
+| Persistence | None; app close intentionally discards the conversation |
+| Protocol surface | Only requests and events exercised by the session-only conversation |
 
-The reasoning and superseded alternatives are recorded in the [decision log](decisions.md).
+The [decision log](decisions.md) records the scope reduction and preserves deferred design choices.
 
 ## System context
 
 ```mermaid
-flowchart TB
-    subgraph Desktop["Vantage — Deno Desktop process"]
-        UI["WebView UI"]
-        GATEWAY["Typed desktop gateway"]
-        PROJECTS["Project registry"]
-        CATALOG["Codex catalog service"]
-        SESSIONS["Codex session manager"]
-        HOST["Codex process host"]
-        PROTOCOL["Typed protocol client"]
-        PROJECTOR["Codex event projector"]
-        PERSIST["Persistence worker"]
-        STORE[("Local SQLite")]
+flowchart LR
+    subgraph Desktop["Vantage desktop"]
+        UI["WebView conversation UI"]
+        HOST["Privileged Deno host"]
 
-        UI -->|"commands and snapshots via bindings"| GATEWAY
-        PROJECTOR -->|"ordered events via local SSE"| UI
-        GATEWAY --> PROJECTS
-        GATEWAY --> CATALOG
-        GATEWAY --> SESSIONS
-        PROJECTS <--> PERSIST
-        SESSIONS <--> PERSIST
-        PROJECTOR <--> PERSIST
-        PERSIST <--> STORE
-        SESSIONS --> PROJECTOR
-        SESSIONS --> HOST
-        CATALOG --> HOST
-        HOST --> PROTOCOL
+        UI -->|"repository, prompt, stop"| HOST
+        HOST -->|"text and terminal state"| UI
     end
 
-    CODEX["codex app-server child process"]
-    HOME[("CODEX_HOME")]
-    REPO[("Selected Git project")]
-    OPENAI["OpenAI Codex service"]
+    CODEX["codex app-server"]
+    REPO[("Selected Git repository")]
+    HOME[("Existing Codex authentication")]
+    SERVICE["OpenAI Codex service"]
 
-    PROTOCOL <-->|"JSON-RPC / JSONL over stdio"| CODEX
-    CODEX <--> HOME
+    HOST <--> CODEX
     CODEX <--> REPO
-    CODEX <--> OPENAI
+    CODEX <--> HOME
+    CODEX <--> SERVICE
 ```
-
-The WebView is an unprivileged presentation boundary. Binding input, SSE connection state, native
-paths, and all Codex payloads must be validated even though they originate on the same machine.
 
 ## Runtime boundaries
 
@@ -86,154 +62,102 @@ paths, and all Codex payloads must be validated even though they originate on th
 
 The UI owns transient presentation state:
 
-- selected project and open thread routes;
-- composer and model-control state;
-- streamed message rendering;
-- tool, approval, error, and connection presentation; and
-- optimistic state that can be replaced by a host snapshot.
+- repository-path input before the conversation begins;
+- the visible user and assistant transcript;
+- composer state;
+- running, completed, interrupted, failed, and retryable states; and
+- the stop control.
 
-It calls a small typed gateway instead of filesystem or process APIs. On load or reconnect it asks
-for a snapshot, then consumes ordered events after the snapshot sequence.
+Every value from the host or Codex is untrusted presentation input. The UI does not receive
+credentials, unrestricted environment values, raw process handles, or filesystem authority.
 
-### Deno host runtime
+### Deno host
 
-The host is the trusted application backend inside the desktop process. It owns:
+The host owns the privileged session:
 
-- project path validation and the project registry;
-- local SQLite migrations and queries through a dedicated persistence worker;
-- Codex executable discovery and version checks;
-- Codex catalog, thread, turn, approval, and recovery services;
-- child-process and shutdown behavior; and
-- the application event sequence exposed to the UI.
+- canonicalize the selected path and verify it is an accessible Git repository;
+- launch and initialize one local app-server process without shell interpolation;
+- start one native thread in that repository with read-only policy;
+- serialize prompt and stop commands;
+- translate only required assistant text and terminal lifecycle events for the UI; and
+- terminate the native process when the window closes.
 
-The host uses Deno subprocess APIs with argument arrays, never a shell-built command string.
+The host does not own a project registry, database, durable transcript, model catalog, approval
+system, general event bus, or provider adapter.
 
 ### Codex child process
 
-Each live Vantage thread gets a locally launched `codex app-server`. Vantage initializes it over
-JSONL stdio, starts or resumes one native Codex thread, and projects native events into UI state.
-The native Codex thread ID is durable; the process is disposable.
+The app-server owns the native thread, turns, repository interaction, and communication with the
+Codex service. Its identity is used only for same-session follow-ups. Vantage makes no claim that
+the conversation can be recovered after app close.
 
-## Desktop communication
-
-Deno Desktop bindings are request/response calls from the WebView into the Deno runtime. Vantage
-uses them for commands and snapshots:
-
-```text
-listProjects
-registerProject
-listThreads
-createThread
-openThread
-listModels
-sendTurn
-interruptTurn
-respondToApproval
-respondToUserInput
-readThreadSnapshot
-```
-
-Streaming is host-initiated, so the first slice uses an `EventSource` connection to a same-origin
-SSE route served by the desktop app's own `Deno.serve()` handler. Every event carries a monotonic
-application sequence. Reconnection supplies the last seen sequence; if retained events no longer
-cover the gap, the UI replaces its state from a fresh snapshot.
-
-This transport is an application seam, not a provider seam. Codex notifications do not cross into
-the UI verbatim.
-
-## State ownership
-
-| State | Source of truth |
-| --- | --- |
-| Registered projects and preferences | Vantage SQLite database |
-| Vantage thread identity and UI projection | Vantage SQLite database |
-| Native conversation history | Codex state under the selected `CODEX_HOME` |
-| Working files and Git state | Project filesystem and Git repository |
-| Running turn and pending approval | Live app-server connection |
-| Available models and account state | Codex app-server catalog snapshot |
-
-Vantage stores native IDs needed to resume and reconcile, but it never rebuilds a Codex thread by
-replaying the projected transcript.
-
-## Main interaction flow
+## Interaction flow
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant UI as WebView UI
+    participant UI as Vantage UI
     participant Host as Deno host
-    participant DB as SQLite
     participant Codex as codex app-server
 
-    User->>UI: Select project and thread
-    UI->>Host: openThread(appThreadId)
-    Host->>DB: Read project, thread, and last sequence
-    Host->>Codex: Spawn, initialize, resume
-    Codex-->>Host: Native thread snapshot
-    Host->>DB: Reconcile projection
-    Host-->>UI: Thread snapshot
-    UI->>Host: Subscribe after snapshot sequence
+    User->>UI: Paste repository path
+    UI->>Host: Start session
+    Host->>Host: Validate Git repository
+    Host->>Codex: Launch, initialize, start thread
     User->>UI: Send prompt
-    UI->>Host: sendTurn(text, model, options)
-    Host->>Codex: turn/start
-    loop Ordered native activity
-        Codex-->>Host: Notifications or server request
-        Host->>DB: Project durable state
-        Host-->>UI: Sequenced SSE event
+    UI->>Host: Start turn
+    Host->>Codex: Start read-only turn
+    loop Assistant response
+        Codex-->>Host: Text or terminal event
+        Host-->>UI: Ordered visible update
     end
-    Codex-->>Host: turn/completed
-    Host-->>UI: Turn completed
+    User->>UI: Send follow-up or stop
+    UI->>Host: Start or interrupt turn
+    Host->>Codex: Continue same thread
 ```
 
-## Persistence shape
+## State and lifecycle
 
-The first schema needs only enough state for the slice:
+All Milestone 1 state is in memory. One repository is fixed for the session after the native thread
+starts. A prompt cannot be submitted while native acceptance is unresolved or a turn is active.
+Completion, interruption, and failure are visible terminal states; none is inferred from partial
+assistant text.
 
-- `projects`: application ID, canonical path, display name, timestamps;
-- `threads`: application ID, project ID, native Codex thread ID, profile, model, reasoning effort,
-  runtime mode, lifecycle state, timestamps, and last error;
-- `turns`: application ID, thread ID, native turn ID, state, usage, timestamps, and last error; and
-- projected messages and activities with a monotonic application sequence.
+Closing the app ends the session. The host closes or terminates the Vantage-owned app-server process
+and the next launch begins without claiming that the repository or conversation was saved.
 
-The built-in `node:sqlite` API is synchronous, so Vantage owns the database in a dedicated worker.
-SQLite writes must never block the host event loop or stdout reader. Native messages enter a bounded
-ordered queue; projection and persistence happen from its consumer through that worker.
+## Safety boundary
 
-## Deno Desktop constraints
+- Canonicalize and validate the repository before it becomes the native working directory.
+- Use a fixed read-only policy so the milestone never depends on approval or file-mutation flows.
+- Launch native processes with argument arrays rather than shell-built command strings.
+- Keep Codex authentication and sensitive environment values out of WebView payloads and ordinary
+  diagnostics.
+- Reject duplicate prompt submission while a turn is unresolved or active.
+- Render provider text without executing markup.
+- Exercise idle and active window-close cleanup on the primary development platform.
 
-`deno desktop` was introduced in Deno 2.9 and is experimental at the time of this decision. The
-first implementation therefore must:
+## Validation boundary
 
-- pin an exact Deno patch version in development and CI;
-- keep desktop-specific calls behind a small host bootstrap and gateway;
-- validate Codex process creation, stdio streaming, shutdown, and SQLite in a packaged build;
-- test the system WebView before adopting CEF or promising identical cross-platform rendering;
-- grant only the filesystem, subprocess, environment, and network permissions the packaged app
-  requires; and
-- treat app-level authorization as mandatory because compiled permissions alone do not express
-  project- and turn-level policy.
+Validation is attached to the two product paths:
 
-Deno Desktop does not currently expose a first-class native folder picker. The vertical slice uses
-a path field with canonicalization and Git-repository validation. A native picker may replace it
-when Deno exposes one or a small, well-tested integration is justified.
+- a focused deterministic check proves repository rejection, one-active-turn enforcement, ordered
+  assistant text, terminal state, interruption, and process cleanup; and
+- a packaged authenticated demonstration proves one repository-grounded prompt and a
+  context-dependent follow-up on the primary development platform.
 
-## Architectural seams, not abstractions
+There is no standalone compatibility, stress, certification, or multi-platform test deliverable.
 
-Small module boundaries are still useful:
+## Deferred design
 
-- desktop bootstrap and gateway;
-- project registry and local store;
-- Codex process host and typed protocol client;
-- Codex catalog, session manager, and event projector; and
-- UI snapshot/event reducer.
-
-These boundaries isolate responsibilities and make tests possible. They must not become a generic
-provider registry, universal agent event taxonomy, or adapter factory during the first slice.
+The broader [Codex integration](codex-app-server.md) and
+[reliability and validation](reliability.md) documents preserve possible future designs for saved
+projects and threads, model controls, approvals, rich activity, persistence, restart recovery, and
+operational hardening. They do not expand Milestone 1.
 
 ## References
 
 - [Deno Desktop overview](https://docs.deno.com/runtime/desktop/)
 - [Deno Desktop bindings](https://docs.deno.com/runtime/desktop/bindings/)
 - [Deno Desktop HTTP serving](https://docs.deno.com/runtime/desktop/serving/)
-- [Deno Desktop backends](https://docs.deno.com/runtime/desktop/backends/)
-- [Deno SQLite API](https://docs.deno.com/api/node/sqlite/)
+- [Codex app-server](https://developers.openai.com/codex/app-server)

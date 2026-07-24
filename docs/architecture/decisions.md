@@ -57,7 +57,7 @@ This choice should change only if measured startup time or memory becomes a real
 
 Date: 2026-07-22
 
-Status: **Provisional**
+Status: **Deferred for Milestone 1 by D-009**
 
 Deno Desktop bindings are a good typed request/response boundary but do not themselves expose a
 host-pushed stream. Vantage will use bindings for commands and snapshots, and a same-origin SSE
@@ -71,7 +71,7 @@ must preserve the same snapshot-plus-sequence contract.
 
 Date: 2026-07-22
 
-Status: **Accepted**
+Status: **Deferred for Milestone 1 by D-009**
 
 Project registration, Vantage/native ID mappings, preferences, and ordered UI projections need
 transactional local persistence. Deno supports SQLite through `node:sqlite`, avoiding a service or a
@@ -85,11 +85,12 @@ serializes transactions so database work cannot block app-server stdout ingestio
 
 Date: 2026-07-22
 
-Status: **Provisional**
+Status: **Accepted path-entry mechanism; persistence deferred by D-009**
 
 Deno Desktop does not currently provide a first-class native folder picker. The first slice accepts
-a pasted or typed path, canonicalizes it, verifies that it is an accessible Git repository, and then
-stores it. This proves sidebar behavior without adding FFI or another desktop framework.
+a pasted or typed path, canonicalizes it, and verifies that it is an accessible Git repository. The
+session-only slice keeps the selected path in memory; saved registration and sidebar behavior are
+deferred.
 
 A native picker can replace the input when the runtime adds one or a focused integration is proven.
 
@@ -97,9 +98,24 @@ A native picker can replace the input when the runtime adds one or a focused int
 
 Date: 2026-07-22
 
-Status: **Accepted**
+Status: **Accepted vocabulary; durability deferred by D-009**
 
 Earlier notes used session for both historical work and a running harness. Vantage uses **thread**
-for the durable conversation, **turn** for one request, and **live session** for the disposable
-app-server connection. This matches the required restart behavior and prevents process lifetime from
-becoming conversation identity.
+for a native conversation, **turn** for one request, and **live session** for the disposable
+app-server connection. Milestone 1 keeps all three in one open app session; a future persistence
+vertical may make the thread durable without changing the vocabulary.
+
+## D-009 — Prove a session-only conversation before durable infrastructure
+
+Date: 2026-07-23
+
+Status: **Accepted**
+
+Milestone 1 is reduced to one selected Git repository, one in-memory native Codex thread, sequential
+read-only turns, streamed assistant text, interruption, and process cleanup in a packaged desktop
+app. This is the smallest consumer-visible test of whether Vantage adds value as a Codex workspace.
+
+SQLite, saved projects and threads, restart recovery, model and runtime selectors, approvals, rich
+activity, generalized event transport, full protocol generation, coverage certification, stress
+programs, and multi-platform claims are deferred. They may be proposed only as later product
+verticals; they are not prerequisites for learning from the session-only conversation.
