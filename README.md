@@ -1,11 +1,38 @@
 # Vantage
 
-Vantage is a local, Codex-first desktop workspace for software development. Its first vertical slice
-will let a developer point a Deno Desktop application at one local Git project, ask Codex a
-repository-aware question, watch the answer stream, and continue or stop the conversation during
-the open app session.
+Vantage is a local, Codex-first desktop workspace for software development. Its
+first packaged vertical lets a developer point a Deno Desktop application at one
+local Git repository, ask their existing Codex installation one read-only
+question, and watch the real answer stream to completion.
 
-The repository is currently in the architecture and vertical-slice design phase.
+## Run the first vertical
+
+Prerequisites:
+
+- macOS on Apple silicon (the primary development platform for Milestone 1);
+- Deno `2.9.3`; and
+- a locally installed and authenticated `codex` CLI available on `PATH`.
+
+```sh
+deno task dev
+```
+
+Paste a Git repository path, wait for native readiness, and ask one question.
+Vantage deliberately does not implement follow-up turns, interruption,
+persistence, model controls, approvals, or write-enabled work in this issue.
+
+Build the packaged application and run all repository checks with:
+
+```sh
+deno task package
+deno task check
+```
+
+For a non-UI diagnostic against the same real app-server client:
+
+```sh
+deno task smoke /path/to/repository "Question about the repository"
+```
 
 ## Documentation
 
