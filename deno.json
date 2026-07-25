@@ -1,0 +1,29 @@
+{
+  "version": "0.1.0",
+  "compilerOptions": {
+    "strict": true
+  },
+  "fmt": {
+    "include": [
+      "deno.json",
+      "README.md",
+      "src",
+      "scripts",
+      "tests"
+    ]
+  },
+  "desktop": {
+    "app": {
+      "name": "Vantage",
+      "identifier": "com.mabrax.vantage"
+    },
+    "backend": "webview"
+  },
+  "tasks": {
+    "check": "deno fmt --check && deno lint && deno check src/main.ts scripts/real_turn_smoke.ts && deno test -A",
+    "dev": "deno desktop --hmr --allow-read --allow-run --allow-env src/main.ts",
+    "package": "deno desktop --allow-read --allow-run --allow-env --output dist/Vantage.app src/main.ts",
+    "smoke": "deno run --allow-read --allow-run --allow-env scripts/real_turn_smoke.ts",
+    "test": "deno test -A"
+  }
+}
