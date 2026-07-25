@@ -18,8 +18,9 @@ flowchart LR
         PROJECT["Select one local Git repository<br/>#2"]
         TURN["Ask once and stream the answer<br/>#2"]
         CONVERSATION["Follow up and stop<br/>#6"]
+        QA["Verify the packaged vertical end to end<br/>#13"]
 
-        PROJECT --> TURN --> CONVERSATION
+        PROJECT --> TURN --> CONVERSATION --> QA
     end
 
     CODEX["codex app-server"]
@@ -54,6 +55,7 @@ flowchart LR
 | --- | --- |
 | Packaged window, one validated repository, one real prompt, and streamed answer | [#2 — Ask Codex about one local repository in Vantage](https://github.com/mabrax/vantage/issues/2) |
 | Same-session follow-up, visible transcript, and stop | [#6 — Continue and stop the Codex conversation in the open app](https://github.com/mabrax/vantage/issues/6) |
+| Automated validation, computer-controlled manual QA, defect repair, and definition-of-done evidence | [#13 — QA the packaged Codex chat milestone end to end](https://github.com/mabrax/vantage/issues/13) |
 | Saved projects, threads, and restart/resume | Future vertical — not scheduled |
 | Model, reasoning, profile, and runtime controls | Future vertical — not scheduled |
 | Approvals, structured input, and write-enabled work | Future vertical — not scheduled |
@@ -65,11 +67,14 @@ flowchart LR
 ```text
 #2 first useful repository-scoped Codex turn
  └─> #6 same-session conversation and stop
+      └─> #13 milestone definition-of-done QA and exit
 ```
 
 Issue #2 collapses the minimum desktop, repository, Codex, UI, and acceptance path because none of
 those pieces has independent user value. Issue #6 waits for that path, then adds the smallest
-capability that turns a one-shot answer into a controllable conversation.
+capability that turns a one-shot answer into a controllable conversation. Issue #13 waits for the
+complete implementation, exercises the packaged app against every acceptance scenario, fixes and
+retests in-scope defects, and records the milestone's final QA checklist.
 
 ## Invariants
 
@@ -85,13 +90,16 @@ capability that turns a one-shot answer into a controllable conversation.
   it does not generate or certify the complete Codex protocol.
 - Tests are limited to the behavioral checks needed to prove the packaged conversation and protect
   repository scoping, duplicate submission, and process cleanup.
+- The milestone closes only after the exit issue records a passing automated and manual QA
+  checklist for the packaged app; blocked user-only steps remain explicit and keep the issue open.
 
 ## Budget and kill criterion
 
 The vertical is capped at five focused implementation days: three for #2 and two for #6. If a
 packaged app cannot complete one real, read-only, repository-scoped Codex turn by the end of day two,
 stop and re-evaluate the desktop/runtime path. Do not use the remaining budget to build additional
-layers, proof publishers, or compatibility machinery.
+layers, proof publishers, or compatibility machinery. Issue #13 is the exit gate rather than a new
+feature allocation; any defect repair it requires still counts against the five-day cap.
 
 ## After this milestone
 

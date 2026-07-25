@@ -130,6 +130,9 @@ Focused behavioral checks protect these scenarios. Tests are not separate milest
 1. [Issue #2](https://github.com/mabrax/vantage/issues/2) delivers the packaged repository selection
    and first real streamed answer.
 2. [Issue #6](https://github.com/mabrax/vantage/issues/6) adds same-session follow-up and stop.
+3. [Issue #13](https://github.com/mabrax/vantage/issues/13) runs repository-wide validation and
+   computer-controlled manual QA, fixes and retests in-scope defects, and records the
+   definition-of-done checklist.
 
 Each issue ends in a user-visible packaged demonstration.
 
