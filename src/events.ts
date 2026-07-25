@@ -13,6 +13,9 @@ export type SessionEvent =
     readonly type: "turn_accepted";
   }
   | {
+    readonly type: "turn_interrupting";
+  }
+  | {
     readonly type: "assistant_delta";
     readonly delta: string;
   }
@@ -21,6 +24,7 @@ export type SessionEvent =
     readonly status: TurnTerminalStatus;
     readonly message?: string;
     readonly action?: string;
+    readonly canContinue: boolean;
   }
   | {
     readonly type: "session_failed";

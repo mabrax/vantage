@@ -84,6 +84,10 @@ window.bind("submitPrompt", async (prompt: unknown) => {
   await controller.submitPrompt(prompt);
   return null;
 });
+window.bind("stopTurn", async () => {
+  await controller.stopTurn();
+  return null;
+});
 
 let closing = false;
 window.addEventListener("close", (event) => {

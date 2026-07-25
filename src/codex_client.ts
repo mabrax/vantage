@@ -18,12 +18,18 @@ interface PendingRequest {
   readonly timeout: ReturnType<typeof setTimeout>;
 }
 
+interface TurnStartedSignal {
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+}
+
 export interface NativeTurnEvent {
   readonly type: "accepted" | "delta" | "terminal";
   readonly delta?: string;
   readonly status?: TurnTerminalStatus;
   readonly message?: string;
   readonly action?: string;
+  readonly canContinue?: boolean;
 }
 
 export interface CodexSession {
@@ -32,6 +38,7 @@ export interface CodexSession {
     prompt: string,
     onEvent: (event: NativeTurnEvent) => void,
   ): Promise<void>;
+  interruptTurn(): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -61,6 +68,8 @@ export class AppServerCodexSession implements CodexSession {
   #threadId: string | null = null;
   #activeTurnId: string | null = null;
   #turnSink: ((event: NativeTurnEvent) => void) | null = null;
+  #turnStarted = false;
+  #turnStartedSignal: TurnStartedSignal | null = null;
   #accepted = false;
   #shuttingDown = false;
   #stdoutTask: Promise<void>;
@@ -165,6 +174,8 @@ export class AppServerCodexSession implements CodexSession {
     }
 
     this.#turnSink = onEvent;
+    this.#turnStarted = false;
+    this.#turnStartedSignal = Promise.withResolvers<void>();
     this.#accepted = false;
     try {
       const response = asObject(
@@ -186,6 +197,9 @@ export class AppServerCodexSession implements CodexSession {
       this.#activeTurnId = turn.id;
       this.#emitAccepted();
     } catch (error) {
+      this.#turnStartedSignal?.resolve();
+      this.#turnStartedSignal = null;
+      this.#turnStarted = false;
       this.#turnSink = null;
       this.#activeTurnId = null;
       if (isUnauthorized(error)) {
@@ -203,12 +217,49 @@ export class AppServerCodexSession implements CodexSession {
     }
   }
 
+  async interruptTurn(): Promise<void> {
+    if (this.#threadId === null) {
+      throw new VantageError(
+        "turn",
+        "The Codex session is not ready.",
+        "Retry the repository session.",
+      );
+    }
+    if (this.#turnSink === null) return;
+
+    if (!this.#turnStarted && this.#turnStartedSignal) {
+      await this.#turnStartedSignal.promise;
+    }
+    if (this.#turnSink === null || this.#activeTurnId === null) return;
+
+    try {
+      await this.#request("turn/interrupt", {
+        threadId: this.#threadId,
+        turnId: this.#activeTurnId,
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /no active turn to interrupt/i.test(error.message)
+      ) {
+        return;
+      }
+      throw new VantageError(
+        "turn",
+        "Codex could not confirm the stop request.",
+        "Retry the repository session before sending another prompt.",
+      );
+    }
+  }
+
   async shutdown(): Promise<void> {
     if (this.#shuttingDown) {
       await Promise.allSettled([this.#stdoutTask, this.#stderrTask]);
       return;
     }
     this.#shuttingDown = true;
+    this.#turnStartedSignal?.resolve();
+    this.#turnStartedSignal = null;
     this.#rejectPending(new Error("Codex session closed"));
 
     try {
@@ -336,6 +387,8 @@ export class AppServerCodexSession implements CodexSession {
       const turn = asObjectOrNull(params.turn);
       if (turn && typeof turn.id === "string") {
         this.#activeTurnId = turn.id;
+        this.#turnStarted = true;
+        this.#turnStartedSignal?.resolve();
         this.#emitAccepted();
       }
       return;
@@ -383,11 +436,15 @@ export class AppServerCodexSession implements CodexSession {
         action: unauthorized
           ? "Run `codex login` outside Vantage, then retry the session."
           : status === "failed"
-          ? "Check Codex outside Vantage, then retry the session."
+          ? "Check Codex outside Vantage, then try another prompt."
           : undefined,
+        canContinue: true,
       });
       this.#turnSink = null;
       this.#activeTurnId = null;
+      this.#turnStartedSignal?.resolve();
+      this.#turnStartedSignal = null;
+      this.#turnStarted = false;
       this.#accepted = false;
     }
   }
@@ -410,8 +467,14 @@ export class AppServerCodexSession implements CodexSession {
         status: "failed",
         message: "Codex stopped before the turn completed.",
         action: "Check Codex outside Vantage, then retry the session.",
+        canContinue: false,
       });
       this.#turnSink = null;
+      this.#activeTurnId = null;
+      this.#turnStartedSignal?.resolve();
+      this.#turnStartedSignal = null;
+      this.#turnStarted = false;
+      this.#accepted = false;
     }
   }
 
