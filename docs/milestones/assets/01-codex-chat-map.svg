@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title description">
+  <title id="title">Milestone 1 Codex chat vertical map</title>
+  <desc id="description">A developer selects a local Git repository in Vantage, asks Codex a question, follows up or stops the response, and completes end-to-end quality assurance. Vantage communicates with the Codex app-server, which reads the repository and communicates with the OpenAI Codex service. Persistence, runtime controls, approvals, rich workspace surfaces, and provider abstraction are deferred.</desc>
+  <defs>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+
+      .canvas { fill: #f8fafc; }
+      .group { fill: #ffffff; stroke: #64748b; stroke-width: 2; }
+      .group-label { fill: #334155; font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; }
+      .node { fill: #ffffff; stroke: #475569; stroke-width: 2; }
+      .node-primary { fill: #eff6ff; stroke: #2563eb; }
+      .node-qa { fill: #ecfdf5; stroke: #059669; }
+      .node-external { fill: #f8fafc; stroke: #64748b; }
+      .node-future { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 7 6; }
+      .text { fill: #0f172a; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 600; text-anchor: middle; }
+      .subtext { fill: #475569; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 500; text-anchor: middle; }
+      .issue { fill: #2563eb; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; text-anchor: middle; }
+      .future-label { fill: #64748b; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; text-anchor: middle; }
+      .edge { fill: none; stroke: #475569; stroke-width: 2.5; marker-end: url(#arrow); }
+      .edge-both { fill: none; stroke: #475569; stroke-width: 2.5; marker-start: url(#arrow-start); marker-end: url(#arrow); }
+      .edge-future { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrow-muted); }
+      .phase { fill: #64748b; font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+      .marker { fill: #475569; }
+      .marker-muted { fill: #94a3b8; }
+
+      @media (prefers-color-scheme: dark) {
+        .canvas { fill: #0d1117; }
+        .group { fill: #161b22; stroke: #8b949e; }
+        .group-label { fill: #c9d1d9; }
+        .node { fill: #161b22; stroke: #8b949e; }
+        .node-primary { fill: #0d2440; stroke: #58a6ff; }
+        .node-qa { fill: #0f2d22; stroke: #3fb950; }
+        .node-external { fill: #161b22; stroke: #8b949e; }
+        .node-future { fill: #161b22; stroke: #6e7681; }
+        .text { fill: #f0f6fc; }
+        .subtext { fill: #b1bac4; }
+        .issue { fill: #58a6ff; }
+        .future-label, .phase { fill: #8b949e; }
+        .edge, .edge-both { stroke: #8b949e; }
+        .edge-future { stroke: #6e7681; }
+        .marker { fill: #8b949e; }
+        .marker-muted { fill: #6e7681; }
+      }
+    </style>
+
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="marker" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+    <marker id="arrow-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="marker" d="M 10 0 L 0 5 L 10 10 z"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="marker-muted" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" x="0" y="0" width="1440" height="900" rx="16"/>
+
+  <text class="phase" x="56" y="60">Milestone delivery path</text>
+
+  <rect class="node node-external" x="50" y="148" width="150" height="76" rx="14"/>
+  <text class="text" x="125" y="193">Developer</text>
+
+  <rect class="group" x="250" y="92" width="1138" height="246" rx="20"/>
+  <text class="group-label" x="280" y="130">Vantage desktop</text>
+
+  <rect class="node node-primary" x="285" y="166" width="232" height="104" rx="14"/>
+  <text class="text" x="401" y="204">Select one local</text>
+  <text class="text" x="401" y="226">Git repository</text>
+  <text class="issue" x="401" y="252">Issue #2</text>
+
+  <rect class="node node-primary" x="557" y="166" width="232" height="104" rx="14"/>
+  <text class="text" x="673" y="204">Ask once and</text>
+  <text class="text" x="673" y="226">stream the answer</text>
+  <text class="issue" x="673" y="252">Issue #2</text>
+
+  <rect class="node node-primary" x="829" y="166" width="232" height="104" rx="14"/>
+  <text class="text" x="945" y="204">Follow up</text>
+  <text class="text" x="945" y="226">and stop</text>
+  <text class="issue" x="945" y="252">Issue #6</text>
+
+  <rect class="node node-qa" x="1101" y="166" width="252" height="104" rx="14"/>
+  <text class="text" x="1227" y="204">Verify packaged vertical</text>
+  <text class="text" x="1227" y="226">end to end</text>
+  <text class="issue" x="1227" y="252">Exit issue #13</text>
+
+  <path class="edge" d="M 200 186 H 285"/>
+  <path class="edge" d="M 517 218 H 557"/>
+  <path class="edge" d="M 789 218 H 829"/>
+  <path class="edge" d="M 1061 218 H 1101"/>
+
+  <text class="phase" x="56" y="406">Runtime boundary</text>
+
+  <rect class="node node-external" x="70" y="450" width="270" height="96" rx="14"/>
+  <text class="text" x="205" y="488">Selected Git repository</text>
+  <text class="subtext" x="205" y="520">Read-only workspace scope</text>
+
+  <rect class="node node-primary" x="585" y="450" width="270" height="96" rx="14"/>
+  <text class="text" x="720" y="488">Codex app-server</text>
+  <text class="subtext" x="720" y="520">Native process boundary</text>
+
+  <rect class="node node-external" x="1100" y="450" width="270" height="96" rx="14"/>
+  <text class="text" x="1235" y="488">OpenAI Codex service</text>
+  <text class="subtext" x="1235" y="520">Authenticated service</text>
+
+  <path class="edge-both" d="M 340 498 H 585"/>
+  <path class="edge-both" d="M 855 498 H 1100"/>
+  <path class="edge-both" d="M 673 270 V 450"/>
+  <path class="edge-both" d="M 945 270 V 368 H 767 V 450"/>
+
+  <text class="phase" x="56" y="626">Deferred beyond this milestone</text>
+  <path class="edge-future" d="M 945 270 V 600 H 1280 V 662"/>
+
+  <rect class="node node-future" x="50" y="674" width="250" height="126" rx="14"/>
+  <text class="text" x="175" y="714">Saved projects</text>
+  <text class="text" x="175" y="736">and restart/resume</text>
+  <text class="future-label" x="175" y="778">Future · not scheduled</text>
+
+  <rect class="node node-future" x="323" y="674" width="250" height="126" rx="14"/>
+  <text class="text" x="448" y="714">Model and</text>
+  <text class="text" x="448" y="736">runtime controls</text>
+  <text class="future-label" x="448" y="778">Future · not scheduled</text>
+
+  <rect class="node node-future" x="596" y="674" width="250" height="126" rx="14"/>
+  <text class="text" x="721" y="714">Approvals and</text>
+  <text class="text" x="721" y="736">structured input</text>
+  <text class="future-label" x="721" y="778">Future · not scheduled</text>
+
+  <rect class="node node-future" x="869" y="674" width="250" height="126" rx="14"/>
+  <text class="text" x="994" y="714">Files, terminal,</text>
+  <text class="text" x="994" y="736">tasks, and flow</text>
+  <text class="future-label" x="994" y="778">Future · not scheduled</text>
+
+  <rect class="node node-future" x="1142" y="674" width="250" height="126" rx="14"/>
+  <text class="text" x="1267" y="714">Provider abstraction</text>
+  <text class="future-label" x="1267" y="778">Future · not scheduled</text>
+
+  <path class="edge-future" d="M 1280 662 H 175 V 674"/>
+  <path class="edge-future" d="M 1280 662 H 448 V 674"/>
+  <path class="edge-future" d="M 1280 662 H 721 V 674"/>
+  <path class="edge-future" d="M 1280 662 H 994 V 674"/>
+  <path class="edge-future" d="M 1280 662 H 1267 V 674"/>
+
+  <text class="subtext" x="720" y="858">Solid nodes are delivered in Milestone 1 · Dashed nodes are deliberately out of scope</text>
+</svg>

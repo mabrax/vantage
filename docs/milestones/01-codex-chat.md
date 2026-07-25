@@ -10,44 +10,7 @@ detail.
 
 ## Map
 
-```mermaid
-flowchart LR
-    USER["Developer"]
-
-    subgraph DESKTOP["Vantage desktop"]
-        PROJECT["Select one local Git repository<br/>#2"]
-        TURN["Ask once and stream the answer<br/>#2"]
-        CONVERSATION["Follow up and stop<br/>#6"]
-        QA["Verify the packaged vertical end to end<br/>#13"]
-
-        PROJECT --> TURN --> CONVERSATION --> QA
-    end
-
-    CODEX["codex app-server"]
-    REPO[("Selected Git repository")]
-    SERVICE["OpenAI Codex service"]
-
-    USER --> PROJECT
-    TURN <--> CODEX
-    CONVERSATION <--> CODEX
-    CODEX <--> REPO
-    CODEX <--> SERVICE
-
-    SAVED["Saved projects and restart/resume<br/>future — not scheduled"]
-    CONTROLS["Model and runtime controls<br/>future — not scheduled"]
-    BLOCKING["Approvals and structured input<br/>future — not scheduled"]
-    SURFACES["Files, terminal, tasks, and flow<br/>future — not scheduled"]
-    PROVIDERS["Provider abstraction<br/>future — not scheduled"]
-
-    CONVERSATION -.-> SAVED
-    CONVERSATION -.-> CONTROLS
-    CONVERSATION -.-> BLOCKING
-    CONVERSATION -.-> SURFACES
-    CONVERSATION -.-> PROVIDERS
-
-    classDef future stroke-dasharray: 4 3,opacity:0.65;
-    class SAVED,CONTROLS,BLOCKING,SURFACES,PROVIDERS future;
-```
+![Milestone 1 Codex chat vertical map](./assets/01-codex-chat-map.svg)
 
 ## Issue map
 
@@ -64,11 +27,9 @@ flowchart LR
 
 ## Sequencing
 
-```text
-#2 first useful repository-scoped Codex turn
- └─> #6 same-session conversation and stop
-      └─> #13 milestone definition-of-done QA and exit
-```
+1. Issue #2 delivers the first useful repository-scoped Codex turn.
+2. Issue #6 follows with the same-session conversation and stop controls.
+3. Issue #13 runs the milestone definition-of-done QA and acts as the exit gate.
 
 Issue #2 collapses the minimum desktop, repository, Codex, UI, and acceptance path because none of
 those pieces has independent user value. Issue #6 waits for that path, then adds the smallest
