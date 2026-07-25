@@ -17,7 +17,7 @@ export const HTML = `<!doctype html>
         <div class="mark" aria-hidden="true">V</div>
         <div>
           <p class="eyebrow">Vantage · local Codex workspace</p>
-          <h1>Ask one repository-aware question.</h1>
+          <h1>Talk with Codex about one repository.</h1>
           <p class="lede">Your repository stays local. Vantage uses your existing Codex installation with read-only access.</p>
         </div>
       </header>
@@ -48,7 +48,7 @@ export const HTML = `<!doctype html>
           <span class="step">02</span>
           <div>
             <h2 id="conversation-heading">Ask Codex</h2>
-            <p>One prompt, streamed from a real native Codex turn.</p>
+            <p>Continue one native conversation while Vantage remains open.</p>
           </div>
         </div>
         <div id="transcript" class="transcript" aria-live="polite"></div>
@@ -57,7 +57,10 @@ export const HTML = `<!doctype html>
           <textarea id="prompt" name="prompt" rows="4" maxlength="32000" placeholder="What does this repository do, based on its source?" required></textarea>
           <div class="composer-footer">
             <span class="policy">Read-only · existing Codex defaults</span>
-            <button id="prompt-submit" type="submit">Ask Codex</button>
+            <div class="composer-actions">
+              <button id="turn-stop" class="stop" type="button" hidden>Stop</button>
+              <button id="prompt-submit" type="submit">Ask Codex</button>
+            </div>
           </div>
         </form>
       </section>
@@ -231,9 +234,15 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .message-role { margin-bottom: 6px; color: #788894; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 .message-body { margin: 0; color: #dfe6ec; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message.assistant .message-body:empty::after { content: "Waiting for Codex…"; color: #6f7c86; font-style: italic; }
+.message-terminal { margin: 9px 0 0; color: #7f8d98; font-size: 11px; }
+.message-terminal.completed { color: #72c39d; }
+.message-terminal.interrupted, .message-terminal.failed { color: #df8b82; }
 
 .composer-footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 10px; }
 .composer-footer button { min-height: 42px; }
+.composer-actions { display: flex; gap: 9px; }
+.stop { border: 1px solid #75443f; background: transparent; color: #efaaa2; }
+.stop:hover:not(:disabled) { background: rgba(117, 68, 63, 0.22); }
 .policy { color: #73818c; font-size: 12px; }
 
 .status {
@@ -276,6 +285,7 @@ export const JAVASCRIPT = `(() => {
   const promptForm = document.querySelector("#prompt-form");
   const promptInput = document.querySelector("#prompt");
   const promptSubmit = document.querySelector("#prompt-submit");
+  const turnStop = document.querySelector("#turn-stop");
   const transcript = document.querySelector("#transcript");
   const status = document.querySelector("#status");
   const statusTitle = document.querySelector("#status-title");
@@ -283,8 +293,9 @@ export const JAVASCRIPT = `(() => {
   const retry = document.querySelector("#retry");
 
   let assistantBody = null;
+  let assistantTerminal = null;
   let sessionReady = false;
-  let promptUsed = false;
+  let turnActive = false;
 
   const setStatus = (kind, title, detail, canRetry = false) => {
     status.className = "status " + kind;
@@ -298,6 +309,13 @@ export const JAVASCRIPT = `(() => {
     repositorySubmit.disabled = busy || sessionReady;
   };
 
+  const setComposerReady = (ready) => {
+    promptInput.disabled = !ready;
+    promptSubmit.disabled = !ready;
+    turnStop.hidden = ready;
+    turnStop.disabled = ready;
+  };
+
   const makeMessage = (role, text) => {
     const article = document.createElement("article");
     article.className = "message " + role;
@@ -308,8 +326,26 @@ export const JAVASCRIPT = `(() => {
     body.className = "message-body";
     body.textContent = text;
     article.append(label, body);
+    let terminal = null;
+    if (role === "assistant") {
+      terminal = document.createElement("p");
+      terminal.className = "message-terminal";
+      terminal.hidden = true;
+      article.append(terminal);
+    }
     transcript.append(article);
-    return body;
+    return { body, terminal };
+  };
+
+  const setTurnTerminal = (event) => {
+    if (!assistantTerminal) return;
+    assistantTerminal.hidden = false;
+    assistantTerminal.className = "message-terminal " + event.status;
+    assistantTerminal.textContent = event.status === "completed"
+      ? "Completed"
+      : event.status === "interrupted"
+      ? "Interrupted"
+      : "Failed";
   };
 
   const nativeErrorText = (error) => {
@@ -326,22 +362,31 @@ export const JAVASCRIPT = `(() => {
         repositoryResult.hidden = false;
         conversation.hidden = false;
         setRepositoryBusy(false);
-        promptInput.disabled = false;
-        promptSubmit.disabled = false;
+        setComposerReady(true);
         retry.hidden = true;
-        setStatus("neutral", "Codex is ready", "Repository validated. Ask one question.");
+        setStatus("neutral", "Codex is ready", "Repository validated. Ask a question.");
         promptInput.focus();
         break;
-      case "turn_pending":
-        promptUsed = true;
+      case "turn_pending": {
+        turnActive = true;
         makeMessage("user", event.prompt);
-        assistantBody = makeMessage("assistant", "");
-        promptInput.disabled = true;
-        promptSubmit.disabled = true;
+        const assistant = makeMessage("assistant", "");
+        assistantBody = assistant.body;
+        assistantTerminal = assistant.terminal;
+        promptInput.value = "";
+        setComposerReady(false);
         setStatus("running", "Submitting prompt", "Waiting for native Codex acceptance.");
         break;
+      }
       case "turn_accepted":
+        turnStop.hidden = false;
+        turnStop.disabled = false;
         setStatus("running", "Codex is working", "Assistant text will appear as it arrives.");
+        break;
+      case "turn_interrupting":
+        turnStop.hidden = false;
+        turnStop.disabled = true;
+        setStatus("running", "Stopping Codex", "Waiting for Codex to report the terminal state.");
         break;
       case "assistant_delta":
         if (assistantBody && typeof event.delta === "string") {
@@ -350,18 +395,22 @@ export const JAVASCRIPT = `(() => {
         }
         break;
       case "turn_terminal":
-        promptInput.disabled = true;
-        promptSubmit.disabled = true;
+        turnActive = false;
+        setTurnTerminal(event);
+        setComposerReady(event.canContinue === true);
         if (event.status === "completed") {
           setStatus("completed", "Completed", "Codex reported that the turn completed.");
         } else if (event.status === "interrupted") {
-          setStatus("failed", "Interrupted", event.message || "Codex reported that the turn was interrupted.", true);
+          setStatus("failed", "Interrupted", event.message || "Codex reported that the turn was interrupted.");
         } else {
-          setStatus("failed", "Codex turn failed", [event.message, event.action].filter(Boolean).join(" "), true);
+          setStatus("failed", "Codex turn failed", [event.message, event.action].filter(Boolean).join(" "), event.canContinue !== true);
         }
+        if (event.canContinue === true) promptInput.focus();
         break;
       case "session_failed":
         sessionReady = false;
+        turnActive = false;
+        setComposerReady(false);
         setRepositoryBusy(false);
         setStatus("failed", event.message, event.action, true);
         break;
@@ -382,23 +431,36 @@ export const JAVASCRIPT = `(() => {
 
   promptForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!sessionReady || promptUsed) return;
-    promptInput.disabled = true;
-    promptSubmit.disabled = true;
+    if (!sessionReady || turnActive) return;
+    setComposerReady(false);
     try {
       await bindings.submitPrompt(promptInput.value);
     } catch (error) {
-      setStatus("failed", "Prompt was not accepted", nativeErrorText(error), true);
+      setComposerReady(true);
+      setStatus("failed", "Prompt was not accepted", nativeErrorText(error));
+    }
+  });
+
+  turnStop.addEventListener("click", async () => {
+    if (!turnActive || turnStop.disabled) return;
+    turnStop.disabled = true;
+    try {
+      await bindings.stopTurn();
+    } catch (error) {
+      turnStop.disabled = false;
+      setStatus("failed", "Stop was not accepted", nativeErrorText(error));
     }
   });
 
   retry.addEventListener("click", () => {
     sessionReady = false;
-    promptUsed = false;
+    turnActive = false;
     assistantBody = null;
+    assistantTerminal = null;
     transcript.replaceChildren();
     conversation.hidden = true;
     repositoryResult.hidden = true;
+    setComposerReady(false);
     repositoryInput.disabled = false;
     repositorySubmit.disabled = false;
     repositoryInput.focus();

@@ -7,6 +7,7 @@ import { SessionController } from "../src/session_controller.ts";
 class FakeCodex implements CodexSession {
   initialized = 0;
   shutdowns = 0;
+  interrupts = 0;
   prompts: string[] = [];
   onTurnEvent: ((event: NativeTurnEvent) => void) | null = null;
   startGate: Promise<void> = Promise.resolve();
@@ -27,6 +28,11 @@ class FakeCodex implements CodexSession {
     await this.startGate;
   }
 
+  interruptTurn(): Promise<void> {
+    this.interrupts++;
+    return Promise.resolve();
+  }
+
   shutdown(): Promise<void> {
     this.shutdowns++;
     return Promise.resolve();
@@ -35,6 +41,10 @@ class FakeCodex implements CodexSession {
   emit(event: NativeTurnEvent): void {
     this.onTurnEvent?.(event);
   }
+}
+
+function flushEvents(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function harness(fake = new FakeCodex()) {
@@ -90,7 +100,7 @@ Deno.test("only one prompt is accepted while native acceptance is pending", asyn
   await Promise.resolve();
   await assert.rejects(
     () => h.controller.submitPrompt("Duplicate question"),
-    /cannot accept another prompt/,
+    /cannot accept a prompt right now/,
   );
   assert.deepEqual(h.fake.prompts, ["First question"]);
   gate.resolve();
@@ -104,8 +114,12 @@ Deno.test("assistant deltas stay ordered through a truthful terminal state", asy
   h.fake.emit({ type: "accepted" });
   h.fake.emit({ type: "delta", delta: "one " });
   h.fake.emit({ type: "delta", delta: "two" });
-  h.fake.emit({ type: "terminal", status: "completed" });
-  await Promise.resolve();
+  h.fake.emit({
+    type: "terminal",
+    status: "completed",
+    canContinue: true,
+  });
+  await flushEvents();
 
   assert.deepEqual(
     h.events.map((event) => event.type),
@@ -127,6 +141,104 @@ Deno.test("assistant deltas stay ordered through a truthful terminal state", asy
     "two",
   );
   assert.equal(h.controller.snapshot().phase, "completed");
+});
+
+Deno.test("sequential prompts reuse one native session and preserve event order", async () => {
+  const h = harness();
+  await h.controller.startSession("/repo");
+
+  await h.controller.submitPrompt("Remember the word amber");
+  h.fake.emit({ type: "accepted" });
+  h.fake.emit({ type: "delta", delta: "Remembered." });
+  h.fake.emit({
+    type: "terminal",
+    status: "completed",
+    canContinue: true,
+  });
+  await flushEvents();
+
+  await h.controller.submitPrompt("Which word?");
+  h.fake.emit({ type: "accepted" });
+  h.fake.emit({ type: "delta", delta: "amber" });
+  h.fake.emit({
+    type: "terminal",
+    status: "completed",
+    canContinue: true,
+  });
+  await flushEvents();
+
+  assert.equal(h.factoryCalls(), 1);
+  assert.deepEqual(h.fake.prompts, [
+    "Remember the word amber",
+    "Which word?",
+  ]);
+  assert.deepEqual(
+    h.events.map((event) => event.type),
+    [
+      "repository_ready",
+      "turn_pending",
+      "turn_accepted",
+      "assistant_delta",
+      "turn_terminal",
+      "turn_pending",
+      "turn_accepted",
+      "assistant_delta",
+      "turn_terminal",
+    ],
+  );
+});
+
+Deno.test("stop stays pending until interruption and then permits a follow-up", async () => {
+  const h = harness();
+  await h.controller.startSession("/repo");
+  await h.controller.submitPrompt("Give a long answer");
+  h.fake.emit({ type: "accepted" });
+  await flushEvents();
+
+  const stopped = await h.controller.stopTurn();
+  assert.equal(stopped.phase, "interrupting");
+  assert.equal(h.fake.interrupts, 1);
+  assert.equal(h.events.at(-1)?.type, "turn_interrupting");
+  assert.equal(
+    h.events.some((event) => event.type === "turn_terminal"),
+    false,
+  );
+  await assert.rejects(
+    () => h.controller.submitPrompt("Too early"),
+    /cannot accept a prompt right now/,
+  );
+
+  h.fake.emit({
+    type: "terminal",
+    status: "interrupted",
+    canContinue: true,
+  });
+  await flushEvents();
+  assert.equal(h.controller.snapshot().phase, "interrupted");
+  assert.equal(h.events.at(-1)?.type, "turn_terminal");
+
+  await h.controller.submitPrompt("Continue with a short answer");
+  assert.deepEqual(h.fake.prompts, [
+    "Give a long answer",
+    "Continue with a short answer",
+  ]);
+});
+
+Deno.test("a retryable native turn failure restores prompt usability", async () => {
+  const h = harness();
+  await h.controller.startSession("/repo");
+  await h.controller.submitPrompt("First attempt");
+  h.fake.emit({
+    type: "terminal",
+    status: "failed",
+    message: "Temporary model failure.",
+    canContinue: true,
+  });
+  await flushEvents();
+
+  assert.equal(h.controller.snapshot().phase, "turn_failed");
+  await h.controller.submitPrompt("Different follow-up");
+  assert.deepEqual(h.fake.prompts, ["First attempt", "Different follow-up"]);
 });
 
 Deno.test("authentication failures are actionable, retryable, and clean up", async () => {
