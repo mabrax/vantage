@@ -28,7 +28,7 @@ Deno.test("bounded offline Mermaid flowcharts retain labels and accessibility te
     "flowchart TD\nA[Prompt] -->|ordered delta| B(Render)\nB --> C{Safe?}",
   );
   assert.equal(result.ok, true);
-  if (!result.ok) return;
+  if (!result.ok || result.value.kind !== "flowchart") return;
   assert.deepEqual(result.value.nodes.map((node) => node.label), [
     "Prompt",
     "Render",
@@ -42,7 +42,7 @@ Deno.test("bounded offline Mermaid flowcharts retain labels and accessibility te
 Deno.test("malformed, unsupported, and oversized Mermaid are rejected without throwing", () => {
   for (
     const source of [
-      "sequenceDiagram\nAlice->>Bob: hello",
+      "classDiagram\nAnimal <|-- Duck",
       "flowchart LR\nclick A https://attacker.invalid",
       "flowchart LR\nA[unfinished",
       `flowchart LR\nA[ok]\n${"x".repeat(MERMAID_SOURCE_LIMIT)}`,
@@ -52,6 +52,52 @@ Deno.test("malformed, unsupported, and oversized Mermaid are rejected without th
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /Mermaid|Invalid|Unsupported/);
   }
+});
+
+Deno.test("Mermaid flowcharts accept safe subgraphs, rich labels, and bidirectional edges", () => {
+  const result = parseMermaid(`flowchart LR
+U["Developer"]
+subgraph V["Vantage desktop"]
+  UI["WebView UI<br/>transcript + controls"]
+  HOST["main.ts<br/>privileged Deno host"]
+  UI -->|"bindings:<br/>repository, prompt, stop"| HOST
+end
+REPO[("Canonical Git repository")]
+HOST <--> REPO`);
+  assert.equal(result.ok, true);
+  if (!result.ok || result.value.kind !== "flowchart") return;
+  assert.equal(result.value.groups[0].label, "Vantage desktop");
+  assert.deepEqual(result.value.groups[0].nodes, ["UI", "HOST"]);
+  assert.equal(
+    result.value.nodes[1].label,
+    "WebView UI\ntranscript + controls",
+  );
+  assert.equal(
+    result.value.edges[0].label,
+    "bindings:\nrepository, prompt, stop",
+  );
+  assert.equal(result.value.edges[1].arrow, "both");
+  assert.equal(result.value.nodes.at(-1)?.shape, "cylinder");
+});
+
+Deno.test("Mermaid sequence diagrams retain participants, messages, and blocks", () => {
+  const result = parseMermaid(`sequenceDiagram
+actor User
+participant UI as WebView UI
+participant Host as Deno host
+User->>UI: Submit prompt
+UI->>Host: submitPrompt(text)
+loop Ordered assistant output
+  Host-->>UI: assistant_delta
+end`);
+  assert.equal(result.ok, true);
+  if (!result.ok || result.value.kind !== "sequence") return;
+  assert.deepEqual(
+    result.value.participants.map((participant) => participant.label),
+    ["User", "WebView UI", "Deno host"],
+  );
+  assert.equal(result.value.steps[2].kind, "block_start");
+  assert.match(result.value.alternative, /UI to Host, submitPrompt/);
 });
 
 Deno.test("safe SVG subset preserves geometry and derives a text alternative", () => {

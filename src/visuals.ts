@@ -4,22 +4,60 @@ export const SVG_SOURCE_LIMIT = 65_536;
 export interface MermaidNode {
   readonly id: string;
   readonly label: string;
-  readonly shape: "rectangle" | "rounded" | "diamond";
+  readonly shape: "rectangle" | "rounded" | "diamond" | "cylinder";
 }
 
 export interface MermaidEdge {
   readonly from: string;
   readonly to: string;
   readonly label: string;
-  readonly arrow: boolean;
+  readonly arrow: "none" | "forward" | "both";
 }
 
-export interface MermaidDiagram {
+export interface MermaidGroup {
+  readonly id: string;
+  readonly label: string;
+  readonly nodes: readonly string[];
+}
+
+export interface MermaidFlowchart {
+  readonly kind: "flowchart";
   readonly direction: "TD" | "BT" | "LR" | "RL";
   readonly nodes: readonly MermaidNode[];
   readonly edges: readonly MermaidEdge[];
+  readonly groups: readonly MermaidGroup[];
   readonly alternative: string;
 }
+
+export interface MermaidParticipant {
+  readonly id: string;
+  readonly label: string;
+  readonly actor: boolean;
+}
+
+export type MermaidSequenceStep =
+  | {
+    readonly kind: "message";
+    readonly from: string;
+    readonly to: string;
+    readonly label: string;
+    readonly dashed: boolean;
+  }
+  | {
+    readonly kind: "block_start";
+    readonly block: string;
+    readonly label: string;
+  }
+  | { readonly kind: "block_end" };
+
+export interface MermaidSequence {
+  readonly kind: "sequence";
+  readonly participants: readonly MermaidParticipant[];
+  readonly steps: readonly MermaidSequenceStep[];
+  readonly alternative: string;
+}
+
+export type MermaidDiagram = MermaidFlowchart | MermaidSequence;
 
 export interface SafeSvgNode {
   readonly name: string;
@@ -44,14 +82,17 @@ export function mermaidNodeToken(
   readonly shape: MermaidNode["shape"];
 } | null {
   const match =
-    /^([A-Za-z][A-Za-z0-9_-]{0,31})(?:\s*(\[[^\]\r\n]{1,120}\]|\([^)\r\n]{1,120}\)|\{[^}\r\n]{1,120}\}))?$/
+    /^([A-Za-z][A-Za-z0-9_-]{0,31})(?:\s*(\[\([^\]\r\n]{1,120}\)\]|\[[^\]\r\n]{1,120}\]|\([^)\r\n]{1,120}\)|\{[^}\r\n]{1,120}\}))?$/
       .exec(value.trim());
   if (!match) return null;
   const descriptor = match[2];
   if (!descriptor) {
     return { id: match[1], label: match[1], shape: "rectangle" };
   }
-  let label = descriptor.slice(1, -1).trim();
+  const cylinder = descriptor.startsWith("[(");
+  let label = cylinder
+    ? descriptor.slice(2, -2).trim()
+    : descriptor.slice(1, -1).trim();
   if (
     label.length >= 2 &&
     ((label.startsWith('"') && label.endsWith('"')) ||
@@ -62,12 +103,281 @@ export function mermaidNodeToken(
   if (label === "") return null;
   return {
     id: match[1],
-    label,
-    shape: descriptor.startsWith("{")
+    label: label.replace(/<br\s*\/?>/gi, "\n"),
+    shape: cylinder
+      ? "cylinder"
+      : descriptor.startsWith("{")
       ? "diamond"
       : descriptor.startsWith("(")
       ? "rounded"
       : "rectangle",
+  };
+}
+
+export function mermaidPlainLabel(value: string): string | null {
+  let label = value.trim();
+  if (
+    label.length >= 2 &&
+    ((label.startsWith('"') && label.endsWith('"')) ||
+      (label.startsWith("'") && label.endsWith("'")))
+  ) {
+    label = label.slice(1, -1);
+  }
+  label = label.replace(/<br\s*\/?>/gi, "\n").trim();
+  return label !== "" && label.length <= 160 ? label : null;
+}
+
+export function parseMermaidSequence(
+  lines: readonly string[],
+  headerIndex: number,
+): VisualResult<MermaidSequence> {
+  const participants = new Map<string, MermaidParticipant>();
+  const steps: MermaidSequenceStep[] = [];
+  let blockDepth = 0;
+  const remember = (id: string, label = id, actor = false): boolean => {
+    const existing = participants.get(id);
+    if (!existing) {
+      participants.set(id, { id, label, actor });
+      return true;
+    }
+    if (existing.label === id && label !== id) {
+      participants.set(id, { id, label, actor });
+      return true;
+    }
+    return existing.label === label || label === id;
+  };
+
+  for (let lineIndex = headerIndex + 1; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex].trim();
+    if (line === "" || line.startsWith("%%")) continue;
+    const declaration =
+      /^(actor|participant)\s+([A-Za-z][A-Za-z0-9_-]{0,31})(?:\s+as\s+(.+))?$/i
+        .exec(line);
+    if (declaration) {
+      const label = mermaidPlainLabel(declaration[3] ?? declaration[2]);
+      if (
+        !label ||
+        !remember(
+          declaration[2],
+          label,
+          declaration[1].toLowerCase() === "actor",
+        )
+      ) {
+        return {
+          ok: false,
+          error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
+        };
+      }
+      continue;
+    }
+    const message =
+      /^([A-Za-z][A-Za-z0-9_-]{0,31}?)\s*(-->>|->>|-->|->)\s*([A-Za-z][A-Za-z0-9_-]{0,31})\s*:\s*(.+)$/
+        .exec(line);
+    if (message) {
+      const label = mermaidPlainLabel(message[4]);
+      if (
+        !label || !remember(message[1]) || !remember(message[3]) ||
+        label.length > 160
+      ) {
+        return {
+          ok: false,
+          error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
+        };
+      }
+      steps.push({
+        kind: "message",
+        from: message[1],
+        to: message[3],
+        label,
+        dashed: message[2].startsWith("--"),
+      });
+    } else {
+      const block = /^(loop|opt|alt|par|critical|break|rect)\s+(.+)$/i.exec(
+        line,
+      );
+      if (block) {
+        const label = mermaidPlainLabel(block[2]);
+        if (!label || blockDepth >= 8) {
+          return {
+            ok: false,
+            error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
+          };
+        }
+        steps.push({
+          kind: "block_start",
+          block: block[1].toLowerCase(),
+          label,
+        });
+        blockDepth++;
+      } else if (/^end$/i.test(line) && blockDepth > 0) {
+        steps.push({ kind: "block_end" });
+        blockDepth--;
+      } else {
+        return {
+          ok: false,
+          error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
+        };
+      }
+    }
+    if (participants.size > 24 || steps.length > 160) {
+      return {
+        ok: false,
+        error: "Mermaid sequence exceeds the 24-participant or 160-step limit.",
+      };
+    }
+  }
+  if (participants.size === 0 || steps.length === 0 || blockDepth !== 0) {
+    return { ok: false, error: "Mermaid sequence diagram is incomplete." };
+  }
+  const participantValues = [...participants.values()];
+  const messages = steps.filter((step) => step.kind === "message");
+  return {
+    ok: true,
+    value: {
+      kind: "sequence",
+      participants: participantValues,
+      steps,
+      alternative: `Sequence diagram. Participants: ${
+        participantValues.map((participant) => participant.label).join("; ")
+      }. Messages: ${
+        messages.map((step) =>
+          step.kind === "message"
+            ? `${step.from} to ${step.to}, ${step.label}`
+            : ""
+        ).filter(Boolean).join("; ")
+      }.`,
+    },
+  };
+}
+
+export function parseMermaidFlowchart(
+  lines: readonly string[],
+  headerIndex: number,
+  direction: MermaidFlowchart["direction"],
+): VisualResult<MermaidFlowchart> {
+  const nodes = new Map<string, MermaidNode>();
+  const edges: MermaidEdge[] = [];
+  const groups: { id: string; label: string; nodes: string[] }[] = [];
+  const groupStack: { id: string; label: string; nodes: string[] }[] = [];
+
+  const remember = (candidate: MermaidNode): boolean => {
+    const existing = nodes.get(candidate.id);
+    if (!existing) {
+      nodes.set(candidate.id, candidate);
+      const group = groupStack.at(-1);
+      if (group && !group.nodes.includes(candidate.id)) {
+        group.nodes.push(candidate.id);
+      }
+      return true;
+    }
+    if (candidate.label === candidate.id && candidate.shape === "rectangle") {
+      return true;
+    }
+    if (existing.label === existing.id && existing.shape === "rectangle") {
+      nodes.set(candidate.id, candidate);
+      return true;
+    }
+    return existing.label === candidate.label &&
+      existing.shape === candidate.shape;
+  };
+
+  for (let lineIndex = headerIndex + 1; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex].trim();
+    if (line === "" || line.startsWith("%%")) continue;
+    const subgraph =
+      /^subgraph\s+([A-Za-z][A-Za-z0-9_-]{0,31})(?:\s*(?:\[(.+)\]|\s+(.+)))?$/i
+        .exec(line);
+    if (subgraph) {
+      const label = mermaidPlainLabel(
+        subgraph[2] ?? subgraph[3] ?? subgraph[1],
+      );
+      if (!label || groupStack.length >= 4) {
+        return {
+          ok: false,
+          error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
+        };
+      }
+      const group = { id: subgraph[1], label, nodes: [] };
+      groups.push(group);
+      groupStack.push(group);
+      continue;
+    }
+    if (/^end$/i.test(line) && groupStack.length > 0) {
+      groupStack.pop();
+      continue;
+    }
+    const edge = /^(.*?)\s*(<-->|-->|---)\s*(?:\|([^|\r\n]{1,160})\|\s*)?(.*?)$/
+      .exec(line);
+    if (edge) {
+      const from = mermaidNodeToken(edge[1]);
+      const to = mermaidNodeToken(edge[4]);
+      const label = edge[3] === undefined ? "" : mermaidPlainLabel(edge[3]);
+      if (
+        !from || !to || label === null || !remember(from) || !remember(to)
+      ) {
+        return {
+          ok: false,
+          error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
+        };
+      }
+      edges.push({
+        from: from.id,
+        to: to.id,
+        label,
+        arrow: edge[2] === "<-->"
+          ? "both"
+          : edge[2] === "-->"
+          ? "forward"
+          : "none",
+      });
+    } else {
+      const node = mermaidNodeToken(line);
+      if (!node || !remember(node)) {
+        return {
+          ok: false,
+          error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
+        };
+      }
+    }
+    if (nodes.size > 40 || edges.length > 80 || groups.length > 12) {
+      return {
+        ok: false,
+        error: "Mermaid diagram exceeds its node, edge, or subgraph limit.",
+      };
+    }
+  }
+  if (groupStack.length > 0) {
+    return { ok: false, error: "Mermaid flowchart has an unclosed subgraph." };
+  }
+  if (nodes.size === 0) {
+    return { ok: false, error: "Mermaid flowchart has no nodes." };
+  }
+  const nodeValues = [...nodes.values()];
+  const alternative = [
+    `Flowchart ${direction}.`,
+    `Nodes: ${
+      nodeValues.map((node) => `${node.id}, ${node.label}`).join("; ")
+    }.`,
+    edges.length > 0
+      ? `Connections: ${
+        edges.map((edge) =>
+          `${edge.from} ${edge.arrow === "none" ? "with" : "to"} ${edge.to}${
+            edge.label ? `, ${edge.label}` : ""
+          }`
+        ).join("; ")
+      }.`
+      : "",
+  ].filter(Boolean).join(" ");
+  return {
+    ok: true,
+    value: {
+      kind: "flowchart",
+      direction,
+      nodes: nodeValues,
+      edges,
+      groups,
+      alternative,
+    },
   };
 }
 
@@ -83,99 +393,23 @@ export function parseMermaid(source: string): VisualResult<MermaidDiagram> {
   while (lineIndex < lines.length && lines[lineIndex].trim() === "") {
     lineIndex++;
   }
+  if (/^sequenceDiagram\s*$/i.test(lines[lineIndex]?.trim() ?? "")) {
+    return parseMermaidSequence(lines, lineIndex);
+  }
   const header = /^(?:flowchart|graph)\s+(TD|TB|BT|LR|RL)\s*$/i.exec(
     lines[lineIndex]?.trim() ?? "",
   );
   if (!header) {
     return {
       ok: false,
-      error:
-        "Unsupported Mermaid. Use a flowchart with TD, BT, LR, or RL direction.",
+      error: "Unsupported Mermaid. Use a flowchart or sequence diagram.",
     };
   }
   const direction =
     (header[1].toUpperCase() === "TB"
       ? "TD"
-      : header[1].toUpperCase()) as MermaidDiagram["direction"];
-  const nodes = new Map<string, MermaidNode>();
-  const edges: MermaidEdge[] = [];
-
-  const remember = (candidate: MermaidNode): boolean => {
-    const existing = nodes.get(candidate.id);
-    if (!existing) {
-      nodes.set(candidate.id, candidate);
-      return true;
-    }
-    if (candidate.label === candidate.id && candidate.shape === "rectangle") {
-      return true;
-    }
-    if (existing.label === existing.id && existing.shape === "rectangle") {
-      nodes.set(candidate.id, candidate);
-      return true;
-    }
-    return existing.label === candidate.label &&
-      existing.shape === candidate.shape;
-  };
-
-  for (lineIndex++; lineIndex < lines.length; lineIndex++) {
-    const line = lines[lineIndex].trim();
-    if (line === "" || line.startsWith("%%")) continue;
-    const edge = /^(.*?)\s*(-->|---)\s*(?:\|([^|\r\n]{1,80})\|\s*)?(.*?)$/
-      .exec(line);
-    if (edge) {
-      const from = mermaidNodeToken(edge[1]);
-      const to = mermaidNodeToken(edge[4]);
-      if (!from || !to || !remember(from) || !remember(to)) {
-        return {
-          ok: false,
-          error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
-        };
-      }
-      edges.push({
-        from: from.id,
-        to: to.id,
-        label: edge[3]?.trim() ?? "",
-        arrow: edge[2] === "-->",
-      });
-    } else {
-      const node = mermaidNodeToken(line);
-      if (!node || !remember(node)) {
-        return {
-          ok: false,
-          error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
-        };
-      }
-    }
-    if (nodes.size > 40 || edges.length > 80) {
-      return {
-        ok: false,
-        error: "Mermaid diagram exceeds the 40-node or 80-edge limit.",
-      };
-    }
-  }
-  if (nodes.size === 0) {
-    return { ok: false, error: "Mermaid flowchart has no nodes." };
-  }
-  const nodeValues = [...nodes.values()];
-  const alternative = [
-    `Flowchart ${direction}.`,
-    `Nodes: ${
-      nodeValues.map((node) => `${node.id}, ${node.label}`).join("; ")
-    }.`,
-    edges.length > 0
-      ? `Connections: ${
-        edges.map((edge) =>
-          `${edge.from} ${edge.arrow ? "to" : "with"} ${edge.to}${
-            edge.label ? `, ${edge.label}` : ""
-          }`
-        ).join("; ")
-      }.`
-      : "",
-  ].filter(Boolean).join(" ");
-  return {
-    ok: true,
-    value: { direction, nodes: nodeValues, edges, alternative },
-  };
+      : header[1].toUpperCase()) as MermaidFlowchart["direction"];
+  return parseMermaidFlowchart(lines, lineIndex, direction);
 }
 
 export function decodeXmlText(value: string): string | null {

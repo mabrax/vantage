@@ -132,30 +132,39 @@ ordinary failure-isolation boundary.
 
 ### Deterministic offline Mermaid subset
 
-Vantage implements a packaged flowchart renderer rather than loading Mermaid
-from a CDN or executing Mermaid directives. It accepts a deliberately small,
-deterministic subset:
+Vantage implements packaged flowchart and sequence-diagram renderers rather
+than loading Mermaid from a CDN or executing Mermaid directives. It accepts a
+deliberately small, deterministic subset:
 
 - a required `flowchart` or `graph` header with `TD`/`TB`, `BT`, `LR`, or `RL`
   direction;
 - node identifiers beginning with an ASCII letter and containing letters,
   digits, `_`, or `-`;
-- rectangle (`A[label]`), rounded (`A(label)`), and diamond (`A{label}`) nodes;
-- one `-->` or `---` connection per line, with an optional `|label|`; and
+- rectangle (`A[label]`), rounded (`A(label)`), diamond (`A{label}`), and
+  cylinder (`A[(label)]`) nodes;
+- one `-->`, `<-->`, or `---` connection per line, with an optional `|label|`;
+- bounded `subgraph ID[label]` groups;
+- a `sequenceDiagram` header, bounded actor and participant declarations,
+  `->`, `->>`, `-->`, and `-->>` messages, and bounded
+  `loop`/`opt`/`alt`/`par`/`critical`/`break`/`rect` blocks; and
+- quoted labels and inert `<br>` line breaks in labels; and
 - blank lines and `%%` comment lines.
 
-It does not accept sequence diagrams, class or style directives, initialization
-directives, clicks, links, icons, images, HTML labels, subgraphs, scripts,
-callbacks, or configuration. Source is limited to 32 KiB and 256 lines; a
-diagram is limited to 40 nodes and 80 edges; identifiers, node labels, and edge
-labels have smaller lexical bounds. Unsupported or malformed input remains
-source rather than being partially executed or interpreted.
+It does not accept class, state, or style directives, initialization directives,
+clicks, links, icons, images, arbitrary HTML labels, scripts, callbacks, or
+configuration. Source is limited to 32 KiB and 256 lines; flowcharts are limited
+to 40 nodes, 80 edges, and 12 subgraphs; sequences are limited to 24
+participants and 160 steps; identifiers, node labels, and edge labels have
+smaller lexical bounds. Unsupported or malformed input remains source rather
+than being partially executed or interpreted.
 
-The renderer lays out accepted nodes in a bounded deterministic grid, then
-creates only trusted SVG `line`, `polygon`, `rect`, and `text` elements.
-Provider labels enter text nodes only. The screen-reader alternative names the
-direction, nodes, and connections; long visible labels may be ellipsized while
-their full values remain in that alternative and the exact-source disclosure.
+The flowchart renderer lays out accepted nodes in a bounded deterministic grid;
+the sequence renderer lays out bounded participant lanes and ordered messages.
+Both create only trusted SVG `line`, `polygon`, `rect`, `text`, and `tspan`
+elements. Provider labels enter text nodes only. The screen-reader alternative
+names the diagram's participants or nodes and connections; long visible labels
+may be ellipsized while their full values remain in that alternative and the
+exact-source disclosure.
 
 ### SVG tokenizer and allowlist
 

@@ -816,6 +816,26 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   stroke: #587080;
   stroke-width: 2;
 }
+.diagram-lifeline, .diagram-message-dashed {
+  stroke: #738896;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+}
+.diagram-group {
+  fill: rgba(223, 234, 240, 0.38);
+  stroke: #9aadb9;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+.diagram-group-label {
+  fill: #354b59;
+  font: 600 11px ui-sans-serif, system-ui, sans-serif;
+}
+.diagram-sequence-block {
+  fill: rgba(223, 234, 240, 0.24);
+  stroke: #9aadb9;
+  stroke-width: 1.5;
+}
 .diagram-arrow { fill: #587080; }
 .diagram-edge-label {
   fill: #354b59;
