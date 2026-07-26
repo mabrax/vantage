@@ -531,10 +531,18 @@ export async function inspectRegisteredRepository(
       args: ["-C", canonicalRoot, "rev-parse", "--show-toplevel"],
       stdin: "null",
       stdout: "piped",
-      stderr: "null",
+      stderr: "piped",
     }).output();
     const root = new TextDecoder().decode(result.stdout).trim();
     if (!result.success || root.length === 0) {
+      const diagnostic = new TextDecoder().decode(result.stderr);
+      if (isGitAccessFailure(diagnostic)) {
+        return unavailable(
+          "inaccessible",
+          "Git cannot access the saved repository.",
+          "Restore local read and directory access, then check the project again.",
+        );
+      }
       return unavailable(
         "not_git",
         "The saved path is no longer a Git repository.",
@@ -557,6 +565,11 @@ export async function inspectRegisteredRepository(
     );
   }
   return AVAILABLE;
+}
+
+function isGitAccessFailure(diagnostic: string): boolean {
+  return /permission denied|operation not permitted|cannot chdir|could not open/i
+    .test(diagnostic);
 }
 
 function projectView(

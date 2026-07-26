@@ -516,6 +516,23 @@ Deno.test("no-longer-Git roots are actionable and selection is blocked during an
   }
 });
 
+Deno.test("registered repository permission failures remain inaccessible rather than not-Git", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "vantage-registry-inaccessible-",
+  });
+  const root = await makeGitRepository(directory, "saved");
+  try {
+    await Deno.chmod(root, 0o000);
+    const availability = await inspectRegisteredRepository(root);
+    assert.equal(availability.availability, "inaccessible");
+    assert.match(availability.message ?? "", /cannot access/i);
+    assert.match(availability.action ?? "", /restore local read/i);
+  } finally {
+    await Deno.chmod(root, 0o755);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("refresh reaps an unavailable selected project while its session is still starting", async () => {
   const directory = await Deno.makeTempDir({
     prefix: "vantage-refresh-starting-",
