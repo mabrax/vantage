@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="980" viewBox="0 0 1440 980" role="img" aria-labelledby="title description">
+  <title id="title">Milestone 3 saved projects and conversations map</title>
+  <desc id="description">A native resume and SQLite foundation supports a persistent project sidebar and one durable Codex conversation per project. Project selection controls the only live app-server session, while saved raw transcript source is rendered through the existing safe response boundary. Packaged quality assurance validates the complete lifecycle. Multiple threads, other workspace surfaces, provider abstraction, collaboration, and release polish remain future work.</desc>
+  <defs>
+    <style>
+      :root { color-scheme: light dark; }
+      .canvas { fill: #f8fafc; }
+      .group { fill: #ffffff; stroke: #64748b; stroke-width: 2; }
+      .group-label { fill: #334155; font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; }
+      .node { fill: #ffffff; stroke: #475569; stroke-width: 2; }
+      .existing { fill: #f8fafc; stroke: #64748b; }
+      .foundation { fill: #fff7ed; stroke: #ea580c; }
+      .projects { fill: #eff6ff; stroke: #2563eb; }
+      .conversation { fill: #f5f3ff; stroke: #7c3aed; }
+      .qa { fill: #ecfdf5; stroke: #059669; }
+      .guard { fill: #f8fafc; stroke: #64748b; }
+      .future { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 7 6; }
+      .text { fill: #0f172a; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 600; text-anchor: middle; }
+      .subtext { fill: #475569; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 500; text-anchor: middle; }
+      .issue { fill: #2563eb; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; text-anchor: middle; }
+      .future-label { fill: #64748b; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; text-anchor: middle; }
+      .phase { fill: #64748b; font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+      .edge { fill: none; stroke: #475569; stroke-width: 2.5; marker-end: url(#arrow); }
+      .guard-edge { fill: none; stroke: #64748b; stroke-width: 2; stroke-dasharray: 5 5; }
+      .future-edge { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 7 6; }
+      .marker { fill: #475569; }
+      @media (prefers-color-scheme: dark) {
+        .canvas { fill: #0d1117; }
+        .group, .node, .future { fill: #161b22; }
+        .group, .existing, .node { stroke: #8b949e; }
+        .existing, .guard { fill: #161b22; stroke: #8b949e; }
+        .group-label, .text { fill: #f0f6fc; }
+        .subtext { fill: #b1bac4; }
+        .phase, .future-label { fill: #8b949e; }
+        .foundation { fill: #351b0c; stroke: #f0883e; }
+        .projects { fill: #0d2440; stroke: #58a6ff; }
+        .conversation { fill: #241640; stroke: #a371f7; }
+        .qa { fill: #0f2d22; stroke: #3fb950; }
+        .issue { fill: #58a6ff; }
+        .edge { stroke: #8b949e; }
+        .guard-edge { stroke: #8b949e; }
+        .future, .future-edge { stroke: #6e7681; }
+        .marker { fill: #8b949e; }
+      }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path class="marker" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" x="0" y="0" width="1440" height="980" rx="16"/>
+
+  <text class="phase" x="54" y="50">Durable project conversation path</text>
+
+  <rect class="node foundation" x="50" y="112" width="250" height="148" rx="14"/>
+  <text class="text" x="175" y="151">Resume + persistence</text>
+  <text class="subtext" x="175" y="179">Native thread proof</text>
+  <text class="subtext" x="175" y="201">SQLite · migrations</text>
+  <text class="subtext" x="175" y="223">Lifecycle reconciliation</text>
+  <text class="issue" x="175" y="247">Kill gate · Issue #25</text>
+
+  <rect class="node projects" x="350" y="112" width="250" height="148" rx="14"/>
+  <text class="text" x="475" y="151">Saved project sidebar</text>
+  <text class="subtext" x="475" y="179">Add · canonicalize · dedupe</text>
+  <text class="subtext" x="475" y="201">Select · validate · remove</text>
+  <text class="subtext" x="475" y="223">Persistent empty state</text>
+  <text class="issue" x="475" y="247">Issue #26</text>
+
+  <rect class="group" x="650" y="78" width="738" height="238" rx="20"/>
+  <text class="group-label" x="682" y="116">Selected project workspace</text>
+
+  <rect class="node conversation" x="690" y="146" width="280" height="132" rx="14"/>
+  <text class="text" x="830" y="180">Durable conversation</text>
+  <text class="subtext" x="830" y="207">Literal prompts · raw answers</text>
+  <text class="subtext" x="830" y="229">Terminal truth · native ID</text>
+  <text class="issue" x="830" y="260">Issue #27</text>
+
+  <rect class="node conversation" x="1010" y="146" width="330" height="132" rx="14"/>
+  <text class="text" x="1175" y="180">One live native session</text>
+  <text class="subtext" x="1175" y="207">Lazy start or honest resume</text>
+  <text class="subtext" x="1175" y="229">Reap before project switch</text>
+  <text class="issue" x="1175" y="260">Issue #27</text>
+
+  <path class="edge" d="M 300 186 H 350"/>
+  <path class="edge" d="M 600 186 H 690"/>
+  <path class="edge" d="M 970 212 H 1010"/>
+
+  <rect class="node existing" x="235" y="390" width="330" height="126" rx="14"/>
+  <text class="text" x="400" y="428">Existing response boundary</text>
+  <text class="subtext" x="400" y="455">Raw Markdown source truth</text>
+  <text class="subtext" x="400" y="477">Safe Mermaid / SVG projection</text>
+  <text class="subtext" x="400" y="499">Offline CSP · exact copy</text>
+
+  <rect class="node guard" x="615" y="390" width="500" height="126" rx="14"/>
+  <text class="text" x="865" y="428">Project isolation and recovery</text>
+  <text class="subtext" x="865" y="455">Selected project owns the only live process</text>
+  <text class="subtext" x="865" y="477">Late events cannot cross project generations</text>
+  <text class="subtext" x="865" y="499">Failed resume stays explicit and non-resumable</text>
+
+  <rect class="node qa" x="1165" y="390" width="225" height="126" rx="14"/>
+  <text class="text" x="1277" y="428">Packaged QA</text>
+  <text class="subtext" x="1277" y="455">Lifecycle · corruption</text>
+  <text class="subtext" x="1277" y="477">Safety · regression</text>
+  <text class="issue" x="1277" y="502">Exit · Issue #28</text>
+
+  <path class="guard-edge" d="M 830 278 V 348 H 400 V 390"/>
+  <path class="guard-edge" d="M 1175 278 V 348 H 865 V 390"/>
+  <path class="edge" d="M 1115 453 H 1165"/>
+
+  <rect class="node foundation" x="230" y="572" width="980" height="104" rx="16"/>
+  <text class="text" x="720" y="610">Durable truth boundary</text>
+  <text class="subtext" x="720" y="638">Canonical Git roots · Vantage-only metadata removal · transactional migrations · no uncertain replay</text>
+  <text class="subtext" x="720" y="660">No credentials or rendered DOM persisted · repositories remain untouched · read-only Codex policy preserved</text>
+
+  <path class="guard-edge" d="M 175 260 V 624 H 230"/>
+  <path class="guard-edge" d="M 475 260 V 552 H 560 V 572"/>
+  <path class="guard-edge" d="M 830 278 V 552 H 850 V 572"/>
+
+  <text class="phase" x="54" y="746">Deferred beyond this milestone</text>
+
+  <rect class="node future" x="50" y="790" width="300" height="120" rx="14"/>
+  <text class="text" x="200" y="830">Thread management</text>
+  <text class="subtext" x="200" y="858">Multiple · create · archive · rename</text>
+  <text class="future-label" x="200" y="888">Future vertical</text>
+
+  <rect class="node future" x="385" y="790" width="300" height="120" rx="14"/>
+  <text class="text" x="535" y="830">Workspace surfaces</text>
+  <text class="subtext" x="535" y="858">Files · terminal · controls · approvals</text>
+  <text class="future-label" x="535" y="888">Future verticals</text>
+
+  <rect class="node future" x="720" y="790" width="300" height="120" rx="14"/>
+  <text class="text" x="870" y="830">Providers and sharing</text>
+  <text class="subtext" x="870" y="858">Abstraction · collaboration · sync</text>
+  <text class="future-label" x="870" y="888">Future architecture</text>
+
+  <rect class="node future" x="1055" y="790" width="335" height="120" rx="14"/>
+  <text class="text" x="1222" y="830">Release expansion</text>
+  <text class="subtext" x="1222" y="858">Multi-platform · installers · polish</text>
+  <text class="future-label" x="1222" y="888">Not scheduled</text>
+
+  <path class="future-edge" d="M 720 676 V 754 H 200 V 790"/>
+  <path class="future-edge" d="M 720 754 H 535 V 790"/>
+  <path class="future-edge" d="M 720 754 H 870 V 790"/>
+  <path class="future-edge" d="M 720 754 H 1222 V 790"/>
+
+  <text class="subtext" x="720" y="950">Solid nodes are delivered in Milestone 3 · Dashed nodes remain deliberately out of scope</text>
+</svg>
