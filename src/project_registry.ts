@@ -55,6 +55,7 @@ export class ProjectRegistryController {
     projects: [],
     selectedProjectId: null,
   };
+  #registryBusy = false;
   #closed = false;
 
   constructor(
@@ -70,17 +71,18 @@ export class ProjectRegistryController {
   ) {}
 
   async initialize(): Promise<ProjectRegistryView> {
-    this.#assertOpen();
-    await this.#reload();
-    if (
-      this.#stored.projects.length > 0 &&
-      this.#stored.selectedProjectId === null
-    ) {
-      const firstProjectId = this.#stored.projects[0].project.id;
-      await this.persistence.setSelectedProject(firstProjectId, this.now());
+    return await this.#runRegistryMutation(async () => {
       await this.#reload();
-    }
-    return this.snapshot();
+      if (
+        this.#stored.projects.length > 0 &&
+        this.#stored.selectedProjectId === null
+      ) {
+        const firstProjectId = this.#stored.projects[0].project.id;
+        await this.persistence.setSelectedProject(firstProjectId, this.now());
+        await this.#reload();
+      }
+      return this.snapshot();
+    });
   }
 
   snapshot(): ProjectRegistryView {
@@ -91,134 +93,142 @@ export class ProjectRegistryController {
   }
 
   async activateSelectedProject(): Promise<ProjectRegistryView> {
-    this.#assertOpen();
-    const selected = this.#selectedView();
-    if (!selected) {
-      await this.session.clearSession();
-      return this.snapshot();
-    }
-    if (selected.availability !== "available") {
-      await this.session.clearSession();
-      return this.snapshot();
-    }
-    await this.session.startSession(
-      selected.canonicalRoot,
-      selected.canonicalRoot,
-    );
-    return this.snapshot();
-  }
-
-  async addProject(input: unknown): Promise<ProjectRegistryView> {
-    this.#assertOpen();
-    this.#assertSessionReplaceable();
-    const canonicalRoot = await this.repositoryValidator(input);
-    const duplicate = this.#stored.projects.find((entry) =>
-      entry.project.canonicalRoot === canonicalRoot
-    );
-    if (duplicate) {
-      throw new VantageError(
-        "project_duplicate",
-        "That Git repository is already saved.",
-        `Select the existing project at ${canonicalRoot}.`,
-      );
-    }
-
-    await this.session.clearSession();
-    const createdAt = Math.max(
-      this.now(),
-      ...this.#stored.projects.map((entry) => entry.project.createdAt + 1),
-    );
-    const projectId = this.createId();
-    const conversationId = this.createId();
-    await this.persistence.createProjectWithConversation({
-      projectId,
-      conversationId,
-      canonicalRoot,
-      createdAt,
-    });
-    await this.persistence.setSelectedProject(projectId, createdAt);
-    await this.#reload();
-    await this.session.startSession(canonicalRoot, canonicalRoot);
-    return this.snapshot();
-  }
-
-  async selectProject(projectId: unknown): Promise<ProjectRegistryView> {
-    this.#assertOpen();
-    this.#assertSessionReplaceable();
-    const project = this.#requireProject(projectId);
-    if (project.project.id === this.#stored.selectedProjectId) {
-      return this.snapshot();
-    }
-
-    await this.session.clearSession();
-    await this.persistence.setSelectedProject(project.project.id, this.now());
-    await this.#reload();
-    const selected = this.#selectedView();
-    if (selected?.availability === "available") {
+    return await this.#runRegistryMutation(async () => {
+      const selected = this.#selectedView();
+      if (!selected) {
+        await this.session.clearSession();
+        return this.snapshot();
+      }
+      if (selected.availability !== "available") {
+        await this.session.clearSession();
+        return this.snapshot();
+      }
       await this.session.startSession(
         selected.canonicalRoot,
         selected.canonicalRoot,
       );
-    } else {
-      await this.session.clearSession();
-    }
-    return this.snapshot();
+      return this.snapshot();
+    });
   }
 
-  async refreshProjects(): Promise<ProjectRegistryView> {
-    this.#assertOpen();
-    await this.#reload();
-    const selected = this.#selectedView();
-    if (
-      selected?.availability !== "available" &&
-      this.session.snapshot().repository !== null
-    ) {
-      await this.session.reapSession();
-    }
-    return this.snapshot();
-  }
-
-  async removeProject(
-    projectId: unknown,
-    confirmed: unknown,
-  ): Promise<ProjectRegistryView> {
-    this.#assertOpen();
-    if (confirmed !== true) {
-      throw new VantageError(
-        "removal_confirmation",
-        "Project removal requires explicit confirmation.",
-        "Confirm removal in Vantage or cancel without changing saved state.",
+  async addProject(input: unknown): Promise<ProjectRegistryView> {
+    return await this.#runRegistryMutation(async () => {
+      this.#assertSessionReplaceable();
+      const canonicalRoot = await this.repositoryValidator(input);
+      const duplicate = this.#stored.projects.find((entry) =>
+        entry.project.canonicalRoot === canonicalRoot
       );
-    }
-    const project = this.#requireProject(projectId);
-    const isSelected = project.project.id === this.#stored.selectedProjectId;
-    if (isSelected) {
-      await this.session.reapSession();
-    }
+      if (duplicate) {
+        throw new VantageError(
+          "project_duplicate",
+          "That Git repository is already saved.",
+          `Select the existing project at ${canonicalRoot}.`,
+        );
+      }
 
-    const remaining = this.#stored.projects.filter((entry) =>
-      entry.project.id !== project.project.id
-    );
-    const nextSelectedProjectId = isSelected
-      ? remaining[0]?.project.id ?? null
-      : this.#stored.selectedProjectId;
-    await this.persistence.removeProject(
-      project.project.id,
-      nextSelectedProjectId,
-      this.now(),
-    );
-    await this.#reload();
+      await this.session.clearSession();
+      const createdAt = Math.max(
+        this.now(),
+        ...this.#stored.projects.map((entry) => entry.project.createdAt + 1),
+      );
+      const projectId = this.createId();
+      const conversationId = this.createId();
+      await this.persistence.createProjectWithConversation({
+        projectId,
+        conversationId,
+        canonicalRoot,
+        createdAt,
+      });
+      await this.persistence.setSelectedProject(projectId, createdAt);
+      await this.#reload();
+      await this.session.startSession(canonicalRoot, canonicalRoot);
+      return this.snapshot();
+    });
+  }
 
-    if (isSelected) {
+  async selectProject(projectId: unknown): Promise<ProjectRegistryView> {
+    return await this.#runRegistryMutation(async () => {
+      this.#assertSessionReplaceable();
+      const project = this.#requireProject(projectId);
+      if (project.project.id === this.#stored.selectedProjectId) {
+        return this.snapshot();
+      }
+
+      await this.session.clearSession();
+      await this.persistence.setSelectedProject(
+        project.project.id,
+        this.now(),
+      );
+      await this.#reload();
       const selected = this.#selectedView();
       if (selected?.availability === "available") {
         await this.session.startSession(
           selected.canonicalRoot,
           selected.canonicalRoot,
         );
+      } else {
+        await this.session.clearSession();
       }
-    }
-    return this.snapshot();
+      return this.snapshot();
+    });
+  }
+
+  async refreshProjects(): Promise<ProjectRegistryView> {
+    return await this.#runRegistryMutation(async () => {
+      await this.#reload();
+      const selected = this.#selectedView();
+      if (
+        selected?.availability !== "available" &&
+        this.session.hasSessionOwnership()
+      ) {
+        await this.session.reapSession();
+      }
+      return this.snapshot();
+    });
+  }
+
+  async removeProject(
+    projectId: unknown,
+    confirmed: unknown,
+  ): Promise<ProjectRegistryView> {
+    return await this.#runRegistryMutation(async () => {
+      if (confirmed !== true) {
+        throw new VantageError(
+          "removal_confirmation",
+          "Project removal requires explicit confirmation.",
+          "Confirm removal in Vantage or cancel without changing saved state.",
+        );
+      }
+      const project = this.#requireProject(projectId);
+      const isSelected = project.project.id === this.#stored.selectedProjectId;
+      if (isSelected) {
+        await this.session.reapSession();
+      }
+
+      const remaining = this.#stored.projects.filter((entry) =>
+        entry.project.id !== project.project.id
+      );
+      const nextSelectedProjectId = isSelected
+        ? remaining[0]?.project.id ?? null
+        : this.#stored.selectedProjectId;
+      await this.persistence.removeProject(
+        project.project.id,
+        nextSelectedProjectId,
+        this.now(),
+      );
+      await this.#reload();
+
+      if (isSelected) {
+        const selected = this.#selectedView();
+        if (selected?.availability === "available") {
+          await this.session.startSession(
+            selected.canonicalRoot,
+            selected.canonicalRoot,
+          );
+        }
+      }
+      return this.snapshot();
+    });
   }
 
   async close(): Promise<void> {
@@ -279,6 +289,23 @@ export class ProjectRegistryController {
         "Projects can be changed only while Codex is idle.",
         "Wait for the current turn to finish or stop it before changing projects.",
       );
+    }
+  }
+
+  async #runRegistryMutation<T>(operation: () => Promise<T>): Promise<T> {
+    this.#assertOpen();
+    if (this.#registryBusy) {
+      throw new VantageError(
+        "invalid_command",
+        "Another saved-project change is already in progress.",
+        "Wait for the current project operation to finish.",
+      );
+    }
+    this.#registryBusy = true;
+    try {
+      return await operation();
+    } finally {
+      this.#registryBusy = false;
     }
   }
 

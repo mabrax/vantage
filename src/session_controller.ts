@@ -30,6 +30,8 @@ export class SessionController {
   #repository: string | null = null;
   #codex: CodexSession | null = null;
   #nativeEvents = Promise.resolve();
+  #cleanupBarrier = Promise.resolve();
+  #shutdowns = new WeakMap<CodexSession, Promise<void>>();
   #sessionGeneration = 0;
 
   constructor(
@@ -52,6 +54,11 @@ export class SessionController {
       this.#phase !== "closed";
   }
 
+  hasSessionOwnership(): boolean {
+    return this.#codex !== null ||
+      (this.#phase !== "empty" && this.#phase !== "closed");
+  }
+
   async startSession(
     input: unknown,
     expectedCanonicalRoot?: string,
@@ -71,12 +78,17 @@ export class SessionController {
     }
 
     const generation = ++this.#sessionGeneration;
-    await this.#disposeCodex();
     this.#phase = "starting";
     this.#repository = null;
+    const cleanup = this.#detachCodex();
+    let codex: CodexSession | null = null;
 
     try {
+      await cleanup;
+      if (!this.#owns(generation, null)) return this.snapshot();
+
       const repository = await this.repositoryValidator(input);
+      if (!this.#owns(generation, null)) return this.snapshot();
       if (
         expectedCanonicalRoot !== undefined &&
         repository !== expectedCanonicalRoot
@@ -87,25 +99,17 @@ export class SessionController {
           "Restore the original canonical root, or remove and explicitly re-add the new project.",
         );
       }
-      const codex = this.codexFactory(repository);
+      codex = this.codexFactory(repository);
       this.#codex = codex;
       await codex.initialize();
-      if (generation !== this.#sessionGeneration) return this.snapshot();
+      if (!this.#owns(generation, codex)) return this.snapshot();
       this.#repository = repository;
       this.#phase = "ready";
       await this.eventSink({ type: "repository_ready", repository });
+      if (!this.#owns(generation, codex)) return this.snapshot();
       return this.snapshot();
     } catch (error) {
-      await this.#disposeCodex();
-      this.#phase = "failed";
-      const failure = asVantageError(error);
-      await this.eventSink({
-        type: "session_failed",
-        code: failure.code,
-        message: failure.message,
-        action: failure.action,
-      });
-      return this.snapshot();
+      return await this.#failSessionStart(error, generation, codex);
     }
   }
 
@@ -137,35 +141,28 @@ export class SessionController {
     }
 
     const prompt = input.trim();
+    const generation = this.#sessionGeneration;
+    const codex = this.#codex;
     this.#phase = "turn_starting";
-    await this.eventSink({ type: "turn_pending", prompt });
 
     try {
-      const generation = this.#sessionGeneration;
-      await this.#codex.startTurn(prompt, (event) => {
-        this.#nativeEvents = this.#nativeEvents.then(() =>
-          this.#onTurnEvent(event, generation)
+      await this.eventSink({ type: "turn_pending", prompt });
+      if (!this.#owns(generation, codex)) return this.snapshot();
+
+      await codex.startTurn(prompt, (event) => {
+        this.#nativeEvents = this.#nativeEvents.catch(() => undefined).then(
+          () => this.#onTurnEvent(event, generation, codex),
         );
       });
-      if (this.#isClosed()) return this.snapshot();
+      if (!this.#owns(generation, codex)) return this.snapshot();
       if (this.#phase === "turn_starting") {
         this.#phase = "running";
         await this.eventSink({ type: "turn_accepted" });
+        if (!this.#owns(generation, codex)) return this.snapshot();
       }
       return this.snapshot();
     } catch (error) {
-      if (this.#isClosed()) return this.snapshot();
-      const failure = asVantageError(error);
-      this.#phase = "failed";
-      await this.#disposeCodex();
-      await this.eventSink({
-        type: "turn_terminal",
-        status: "failed",
-        message: failure.message,
-        action: failure.action,
-        canContinue: false,
-      });
-      return this.snapshot();
+      return await this.#failTurn(error, generation, codex);
     }
   }
 
@@ -180,26 +177,22 @@ export class SessionController {
       );
     }
 
+    const generation = this.#sessionGeneration;
+    const codex = this.#codex;
     this.#phase = "interrupting";
-    await this.eventSink({ type: "turn_interrupting" });
 
     try {
-      await this.#codex.interruptTurn();
+      await this.eventSink({ type: "turn_interrupting" });
+      if (!this.#owns(generation, codex)) return this.snapshot();
+      await codex.interruptTurn();
+      if (!this.#owns(generation, codex)) return this.snapshot();
     } catch (error) {
       await this.#nativeEvents;
+      if (!this.#owns(generation, codex)) return this.snapshot();
       if (this.#phase !== "interrupting") {
         return this.snapshot();
       }
-      const failure = asVantageError(error);
-      this.#phase = "failed";
-      await this.#disposeCodex();
-      await this.eventSink({
-        type: "turn_terminal",
-        status: "failed",
-        message: failure.message,
-        action: failure.action,
-        canContinue: false,
-      });
+      return await this.#failTurn(error, generation, codex);
     }
     return this.snapshot();
   }
@@ -208,7 +201,8 @@ export class SessionController {
     if (this.#phase === "closed") return;
     this.#sessionGeneration++;
     this.#phase = "closed";
-    await this.#disposeCodex();
+    this.#repository = null;
+    await this.#detachCodex();
   }
 
   async clearSession(): Promise<SessionSnapshot> {
@@ -230,24 +224,25 @@ export class SessionController {
         "Reopen Vantage before starting another project.",
       );
     }
-    this.#sessionGeneration++;
-    await this.#disposeCodex();
+    const generation = ++this.#sessionGeneration;
     this.#repository = null;
     this.#phase = "empty";
+    await this.#detachCodex();
+    if (!this.#isCurrent(generation)) return this.snapshot();
     return this.snapshot();
   }
 
   async #onTurnEvent(
     event: NativeTurnEvent,
     generation: number,
+    codex: CodexSession,
   ): Promise<void> {
-    if (this.#phase === "closed" || generation !== this.#sessionGeneration) {
-      return;
-    }
+    if (!this.#owns(generation, codex)) return;
     if (event.type === "accepted") {
       if (this.#phase === "turn_starting") {
         this.#phase = "running";
         await this.eventSink({ type: "turn_accepted" });
+        if (!this.#owns(generation, codex)) return;
       }
       return;
     }
@@ -255,17 +250,19 @@ export class SessionController {
       if (this.#phase === "turn_starting") {
         this.#phase = "running";
         await this.eventSink({ type: "turn_accepted" });
+        if (!this.#owns(generation, codex)) return;
       }
       if (this.#phase === "running") {
         await this.eventSink({
           type: "assistant_delta",
           delta: event.delta,
         });
+        if (!this.#owns(generation, codex)) return;
       }
       return;
     }
     if (event.type === "terminal" && event.status) {
-      const canContinue = event.canContinue !== false && this.#codex !== null;
+      const canContinue = event.canContinue !== false;
       this.#phase = canContinue
         ? event.status === "completed"
           ? "completed"
@@ -280,7 +277,62 @@ export class SessionController {
         action: event.action,
         canContinue,
       });
+      if (!this.#owns(generation, codex)) return;
     }
+  }
+
+  async #failSessionStart(
+    error: unknown,
+    generation: number,
+    codex: CodexSession | null,
+  ): Promise<SessionSnapshot> {
+    if (!this.#owns(generation, codex)) return this.snapshot();
+    this.#phase = "failed";
+    this.#repository = null;
+    try {
+      await this.#detachCodex(codex);
+    } catch (cleanupError) {
+      if (!this.#isCurrent(generation)) return this.snapshot();
+      throw cleanupError;
+    }
+    if (!this.#isCurrent(generation)) return this.snapshot();
+
+    const failure = asVantageError(error);
+    await this.eventSink({
+      type: "session_failed",
+      code: failure.code,
+      message: failure.message,
+      action: failure.action,
+    });
+    if (!this.#isCurrent(generation)) return this.snapshot();
+    return this.snapshot();
+  }
+
+  async #failTurn(
+    error: unknown,
+    generation: number,
+    codex: CodexSession,
+  ): Promise<SessionSnapshot> {
+    if (!this.#owns(generation, codex)) return this.snapshot();
+    const failure = asVantageError(error);
+    this.#phase = "failed";
+    try {
+      await this.#detachCodex(codex);
+    } catch (cleanupError) {
+      if (!this.#isCurrent(generation)) return this.snapshot();
+      throw cleanupError;
+    }
+    if (!this.#isCurrent(generation)) return this.snapshot();
+
+    await this.eventSink({
+      type: "turn_terminal",
+      status: "failed",
+      message: failure.message,
+      action: failure.action,
+      canContinue: false,
+    });
+    if (!this.#isCurrent(generation)) return this.snapshot();
+    return this.snapshot();
   }
 
   #canSubmitPrompt(): boolean {
@@ -290,13 +342,32 @@ export class SessionController {
       this.#phase === "turn_failed";
   }
 
-  #isClosed(): boolean {
-    return this.#phase === "closed";
+  #owns(generation: number, codex: CodexSession | null): boolean {
+    return this.#isCurrent(generation) && this.#codex === codex;
   }
 
-  async #disposeCodex(): Promise<void> {
+  #isCurrent(generation: number): boolean {
+    return generation === this.#sessionGeneration &&
+      this.#phase !== "closed";
+  }
+
+  #detachCodex(expected?: CodexSession | null): Promise<void> {
+    if (expected !== undefined && this.#codex !== expected) {
+      return this.#cleanupBarrier;
+    }
     const codex = this.#codex;
     this.#codex = null;
-    if (codex) await codex.shutdown();
+    if (codex === null) return this.#cleanupBarrier;
+
+    let shutdown = this.#shutdowns.get(codex);
+    if (!shutdown) {
+      shutdown = Promise.resolve().then(() => codex.shutdown());
+      this.#shutdowns.set(codex, shutdown);
+    }
+    const previousCleanup = this.#cleanupBarrier.catch(() => undefined);
+    this.#cleanupBarrier = Promise.all([previousCleanup, shutdown]).then(
+      () => undefined,
+    );
+    return this.#cleanupBarrier;
   }
 }

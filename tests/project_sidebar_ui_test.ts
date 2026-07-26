@@ -51,3 +51,32 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
   assert.equal(JAVASCRIPT.includes("innerHTML"), false);
   assert.equal(JAVASCRIPT.includes("outerHTML"), false);
 });
+
+Deno.test("registry busy state guards and disables every competing project mutation without blocking active-turn removal", () => {
+  assert.match(JAVASCRIPT, /let registryBusy = false/);
+  assert.match(
+    JAVASCRIPT,
+    /repositoryInput\.disabled = busy \|\| turnActive/,
+  );
+  assert.match(
+    JAVASCRIPT,
+    /select\.disabled = registryBusy \|\| turnActive/,
+  );
+  assert.match(JAVASCRIPT, /remove\.disabled = registryBusy/);
+  assert.match(JAVASCRIPT, /workspaceRemove\.disabled = busy/);
+  assert.match(JAVASCRIPT, /removeConfirm\.disabled = busy/);
+  assert.match(
+    JAVASCRIPT,
+    /!nativeBindings \|\| registryBusy \|\| removalProjectId === null/,
+  );
+  assert.equal(
+    JAVASCRIPT.includes(
+      "!nativeBindings || registryBusy || turnActive || removalProjectId",
+    ),
+    false,
+  );
+  assert.match(
+    JAVASCRIPT,
+    /finally \{\s+setRepositoryBusy\(false\);\s+\}/,
+  );
+});

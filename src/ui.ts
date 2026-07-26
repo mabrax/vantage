@@ -699,6 +699,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   let activeAssistant = null;
   let sessionReady = false;
   let turnActive = false;
+  let registryBusy = false;
   let registry = { projects: [], selectedProjectId: null };
   let removalProjectId = null;
   let readyRepository = null;
@@ -711,9 +712,15 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   };
 
   const setRepositoryBusy = (busy) => {
+    registryBusy = busy;
     repositoryInput.disabled = busy || turnActive;
     repositorySubmit.disabled = busy || turnActive;
     refreshProjects.disabled = busy || turnActive;
+    unavailableRefresh.disabled = busy || turnActive;
+    workspaceRemove.disabled = busy;
+    removeConfirm.disabled = busy;
+    retry.disabled = busy || turnActive;
+    renderProjects();
   };
 
   const setComposerReady = (ready) => {
@@ -732,12 +739,14 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     transcript.replaceChildren();
     conversation.hidden = true;
     setComposerReady(false);
+    setRepositoryBusy(registryBusy);
   };
 
   const selectedProject = () =>
     registry.projects.find((project) => project.id === registry.selectedProjectId) || null;
 
   const showRemoval = (project) => {
+    if (registryBusy) return;
     removalProjectId = project.id;
     removeProjectName.textContent = project.canonicalRoot;
     if (typeof removeDialog.showModal === "function") {
@@ -766,7 +775,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
       const select = document.createElement("button");
       select.className = "project-select";
       select.type = "button";
-      select.disabled = turnActive;
+      select.disabled = registryBusy || turnActive;
       select.setAttribute("aria-current", project.selected ? "page" : "false");
       const name = document.createElement("strong");
       name.className = "project-name";
@@ -789,6 +798,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
       remove.title = "Remove " + project.name + " from Vantage";
       remove.setAttribute("aria-label", remove.title);
       remove.textContent = "×";
+      remove.disabled = registryBusy;
       remove.addEventListener("click", () => showRemoval(project));
       item.append(select, remove);
       projectList.append(item);
@@ -843,44 +853,65 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   };
 
   const chooseProject = async (projectId) => {
-    if (!nativeBindings || turnActive || projectId === registry.selectedProjectId) return;
+    if (
+      !nativeBindings || registryBusy || turnActive ||
+      projectId === registry.selectedProjectId
+    ) return;
     resetConversation();
     setRepositoryBusy(true);
     setStatus("running", "Switching project", "Stopping the prior Vantage-owned process before opening the selected workspace.");
-    const result = await nativeBindings.selectProject(projectId);
-    setRepositoryBusy(false);
-    if (result && result.ok) applyRegistry(result.snapshot);
-    else hostFailure(result, "The selected project could not be opened.");
+    try {
+      const result = await nativeBindings.selectProject(projectId);
+      if (result && result.ok) applyRegistry(result.snapshot);
+      else hostFailure(result, "The selected project could not be opened.");
+    } catch (error) {
+      hostFailure({ error }, "The selected project could not be opened.");
+    } finally {
+      setRepositoryBusy(false);
+    }
   };
 
-  const activateCurrent = async () => {
-    if (!nativeBindings || turnActive || !selectedProject()) return;
+  const activateCurrent = async (alreadyBusy = false) => {
+    if (
+      !nativeBindings || (!alreadyBusy && registryBusy) || turnActive ||
+      !selectedProject()
+    ) return;
     resetConversation();
-    setRepositoryBusy(true);
+    if (!alreadyBusy) setRepositoryBusy(true);
     setStatus("running", "Opening selected project", "Checking its saved canonical Git root before launching Codex.");
-    const result = await nativeBindings.activateSelectedProject();
-    setRepositoryBusy(false);
-    if (result && result.ok) applyRegistry(result.snapshot);
-    else hostFailure(result, "The selected project could not be opened.");
+    try {
+      const result = await nativeBindings.activateSelectedProject();
+      if (result && result.ok) applyRegistry(result.snapshot);
+      else hostFailure(result, "The selected project could not be opened.");
+    } catch (error) {
+      hostFailure({ error }, "The selected project could not be opened.");
+    } finally {
+      if (!alreadyBusy) setRepositoryBusy(false);
+    }
   };
 
   const refreshRegistry = async () => {
-    if (!nativeBindings || turnActive) return;
+    if (!nativeBindings || registryBusy || turnActive) return;
     const previous = selectedProject();
     setRepositoryBusy(true);
-    const result = await nativeBindings.refreshProjects();
-    setRepositoryBusy(false);
-    if (result && result.ok) {
-      applyRegistry(result.snapshot);
-      const current = selectedProject();
-      if (
-        previous && current &&
-        previous.availability !== "available" &&
-        current.availability === "available"
-      ) {
-        await activateCurrent();
-      }
-    } else hostFailure(result, "Saved projects could not be checked.");
+    try {
+      const result = await nativeBindings.refreshProjects();
+      if (result && result.ok) {
+        applyRegistry(result.snapshot);
+        const current = selectedProject();
+        if (
+          previous && current &&
+          previous.availability !== "available" &&
+          current.availability === "available"
+        ) {
+          await activateCurrent(true);
+        }
+      } else hostFailure(result, "Saved projects could not be checked.");
+    } catch (error) {
+      hostFailure({ error }, "Saved projects could not be checked.");
+    } finally {
+      setRepositoryBusy(false);
+    }
   };
 
   const makeMessage = (role, text) => {
@@ -940,7 +971,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         sessionReady = true;
         readyRepository = event.repository;
         conversation.hidden = false;
-        setRepositoryBusy(false);
+        setRepositoryBusy(registryBusy);
         setComposerReady(true);
         retry.hidden = true;
         setStatus("neutral", "Codex is ready", "Repository validated. Ask a question.");
@@ -948,6 +979,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         break;
       case "turn_pending": {
         turnActive = true;
+        setRepositoryBusy(registryBusy);
         makeMessage("user", event.prompt);
         const assistant = makeMessage("assistant", "");
         assistantMessages.push(assistant);
@@ -976,6 +1008,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         break;
       case "turn_terminal":
         turnActive = false;
+        setRepositoryBusy(registryBusy);
         setTurnTerminal(event);
         setComposerReady(event.canContinue === true);
         if (event.status === "completed") {
@@ -992,7 +1025,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         readyRepository = null;
         turnActive = false;
         setComposerReady(false);
-        setRepositoryBusy(false);
+        setRepositoryBusy(registryBusy);
         setStatus("failed", event.message, event.action, true);
         break;
     }
@@ -1000,16 +1033,21 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
 
   repositoryForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!nativeBindings || turnActive) return;
+    if (!nativeBindings || registryBusy || turnActive) return;
     setRepositoryBusy(true);
     setStatus("running", "Checking repository", "Vantage will save it only after canonical Git-root validation succeeds.");
-    const result = await nativeBindings.addProject(repositoryInput.value);
-    setRepositoryBusy(false);
-    if (result && result.ok) {
-      repositoryInput.value = "";
-      applyRegistry(result.snapshot);
-    } else {
-      hostFailure(result, "The project could not be added.");
+    try {
+      const result = await nativeBindings.addProject(repositoryInput.value);
+      if (result && result.ok) {
+        repositoryInput.value = "";
+        applyRegistry(result.snapshot);
+      } else {
+        hostFailure(result, "The project could not be added.");
+      }
+    } catch (error) {
+      hostFailure({ error }, "The project could not be added.");
+    } finally {
+      setRepositoryBusy(false);
     }
   });
 
@@ -1039,21 +1077,27 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   refreshProjects.addEventListener("click", () => void refreshRegistry());
   unavailableRefresh.addEventListener("click", () => void refreshRegistry());
   workspaceRemove.addEventListener("click", () => {
+    if (registryBusy) return;
     const selected = selectedProject();
     if (selected) showRemoval(selected);
   });
   removeCancel.addEventListener("click", closeRemoval);
   removeConfirm.addEventListener("click", async () => {
-    if (!nativeBindings || removalProjectId === null) return;
+    if (!nativeBindings || registryBusy || removalProjectId === null) return;
     const projectId = removalProjectId;
     closeRemoval();
     resetConversation();
     setRepositoryBusy(true);
     setStatus("running", "Removing saved project", "Stopping any selected Vantage-owned process before forgetting Vantage metadata.");
-    const result = await nativeBindings.removeProject(projectId, true);
-    setRepositoryBusy(false);
-    if (result && result.ok) applyRegistry(result.snapshot);
-    else hostFailure(result, "The project could not be removed.");
+    try {
+      const result = await nativeBindings.removeProject(projectId, true);
+      if (result && result.ok) applyRegistry(result.snapshot);
+      else hostFailure(result, "The project could not be removed.");
+    } catch (error) {
+      hostFailure({ error }, "The project could not be removed.");
+    } finally {
+      setRepositoryBusy(false);
+    }
   });
 
   retry.addEventListener("click", () => {
@@ -1066,17 +1110,31 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   });
 
   const initialize = async () => {
-    const result = await nativeBindings.initializeApp();
-    if (!result || !result.ok) {
-      hostFailure(result, "Vantage could not open its saved project registry.");
-      return;
-    }
-    applyRegistry(result.snapshot);
-    if (result.snapshot.selectedProjectId !== null) {
-      await activateCurrent();
+    setRepositoryBusy(true);
+    try {
+      const result = await nativeBindings.initializeApp();
+      if (!result || !result.ok) {
+        hostFailure(
+          result,
+          "Vantage could not open its saved project registry.",
+        );
+        return;
+      }
+      applyRegistry(result.snapshot);
+      if (result.snapshot.selectedProjectId !== null) {
+        await activateCurrent(true);
+      }
+    } catch (error) {
+      hostFailure(
+        { error },
+        "Vantage could not open its saved project registry.",
+      );
+    } finally {
+      setRepositoryBusy(false);
     }
   };
 
   setComposerReady(false);
+  setRepositoryBusy(false);
   if (nativeBindings) void initialize();
 })();`;

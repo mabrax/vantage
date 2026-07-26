@@ -13,12 +13,13 @@ class FakeCodex implements CodexSession {
   readonly prompts: string[] = [];
   shutdowns = 0;
   onTurnEvent: ((event: NativeTurnEvent) => void) | null = null;
+  initializeGate: Promise<void> = Promise.resolve();
 
   constructor(readonly repository: string, readonly log: string[]) {}
 
-  initialize(): Promise<void> {
+  async initialize(): Promise<void> {
     this.log.push(`initialize:${this.repository}`);
-    return Promise.resolve();
+    await this.initializeGate;
   }
 
   startTurn(
@@ -104,6 +105,14 @@ async function gitStatus(root: string): Promise<string> {
   }).output();
   assert.equal(result.success, true);
   return new TextDecoder().decode(result.stdout);
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  assert.fail("Timed out waiting for the deferred registry operation.");
 }
 
 Deno.test("registry canonicalizes aliases, persists order and selection, and starts only the selected project", async () => {
@@ -365,6 +374,121 @@ Deno.test("no-longer-Git roots are actionable and selection is blocked during an
     assert.equal(harness.session.snapshot().phase, "empty");
   } finally {
     await harness.registry.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("refresh reaps an unavailable selected project while its session is still starting", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "vantage-refresh-starting-",
+  });
+  const databasePath = `${directory}/vantage.sqlite3`;
+  const root = await makeGitRepository(directory, "selected");
+  const moved = `${directory}/moved`;
+  const persistence = await PersistenceOwner.open(databasePath);
+  const initialization = Promise.withResolvers<void>();
+  const log: string[] = [];
+  const client = new FakeCodex(root, log);
+  client.initializeGate = initialization.promise;
+  const events: string[] = [];
+  const session = new SessionController(
+    (event) => {
+      events.push(event.type);
+    },
+    () => client,
+    (path) => Promise.resolve(String(path)),
+  );
+  const registry = new ProjectRegistryController(persistence, session);
+
+  try {
+    await persistence.createProjectWithConversation({
+      projectId: "project-selected",
+      conversationId: "conversation-selected",
+      canonicalRoot: root,
+      createdAt: 1,
+    });
+    await persistence.setSelectedProject("project-selected", 2);
+    await registry.initialize();
+
+    const starting = session.startSession(root, root);
+    await waitFor(() => log.includes(`initialize:${root}`));
+    assert.deepEqual(session.snapshot(), {
+      phase: "starting",
+      repository: null,
+    });
+
+    await Deno.rename(root, moved);
+    const snapshot = await registry.refreshProjects();
+    assert.equal(snapshot.projects[0].availability, "missing");
+    assert.equal(client.shutdowns, 1);
+    assert.deepEqual(session.snapshot(), {
+      phase: "empty",
+      repository: null,
+    });
+
+    initialization.reject(new Error("late initialization rejection"));
+    await starting;
+    assert.deepEqual(events, []);
+    assert.equal(client.shutdowns, 1);
+    assert.deepEqual(session.snapshot(), {
+      phase: "empty",
+      repository: null,
+    });
+  } finally {
+    await registry.close().catch(() => undefined);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("the native registry boundary rejects a competing mutation while validation is deferred", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "vantage-registry-busy-",
+  });
+  const databasePath = `${directory}/vantage.sqlite3`;
+  const root = await makeGitRepository(directory, "project");
+  const persistence = await PersistenceOwner.open(databasePath);
+  const validation = Promise.withResolvers<string>();
+  let validationStarted = false;
+  const session = new SessionController(
+    () => {},
+    (repository) => new FakeCodex(repository, []),
+  );
+  const ids = ["project-busy", "conversation-busy"];
+  const registry = new ProjectRegistryController(
+    persistence,
+    session,
+    () => {
+      validationStarted = true;
+      return validation.promise;
+    },
+    undefined,
+    () => ids.shift()!,
+    () => 10,
+  );
+
+  try {
+    await registry.initialize();
+    const adding = registry.addProject(root);
+    await waitFor(() => validationStarted);
+    await assert.rejects(
+      () => registry.refreshProjects(),
+      (error) =>
+        error instanceof VantageError &&
+        error.code === "invalid_command" &&
+        /already in progress/i.test(error.message),
+    );
+
+    validation.resolve(root);
+    const snapshot = await adding;
+    assert.equal(snapshot.projects.length, 1);
+    assert.equal(snapshot.selectedProjectId, "project-busy");
+    assert.deepEqual(session.snapshot(), {
+      phase: "ready",
+      repository: root,
+    });
+  } finally {
+    validation.resolve(root);
+    await registry.close().catch(() => undefined);
     await Deno.remove(directory, { recursive: true });
   }
 });
