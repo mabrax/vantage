@@ -53,6 +53,7 @@ deno task smoke /path/to/repository \
 - [Documentation map](docs/README.md)
 - [Product foundation](docs/FOUNDATION.md)
 - [Architecture overview](docs/architecture/README.md)
+- [Rich response rendering](docs/architecture/rich-response-rendering.md)
 - [First vertical slice](docs/architecture/vertical-slice.md)
 - [Codex app-server integration](docs/architecture/codex-app-server.md)
 - [Reliability and validation](docs/architecture/reliability.md)

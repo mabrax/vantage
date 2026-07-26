@@ -1,3 +1,5 @@
+import { MARKDOWN_JAVASCRIPT } from "./markdown.ts";
+
 export const HTML = `<!doctype html>
 <html lang="en">
   <head>
@@ -228,11 +230,131 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .repo-dot { width: 8px; height: 8px; border-radius: 50%; background: #72c39d; box-shadow: 0 0 0 4px rgba(114, 195, 157, 0.1); }
 
 .transcript:empty { display: none; }
-.transcript { display: grid; gap: 14px; margin-bottom: 18px; }
-.message { border-left: 2px solid #2b3a45; padding: 4px 0 4px 15px; }
+.transcript { display: grid; min-width: 0; gap: 14px; margin-bottom: 18px; }
+.message { min-width: 0; max-width: 100%; border-left: 2px solid #2b3a45; padding: 4px 0 4px 15px; }
 .message.user { border-color: #567564; }
 .message-role { margin-bottom: 6px; color: #788894; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
-.message-body { margin: 0; color: #dfe6ec; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-body { min-width: 0; margin: 0; color: #dfe6ec; line-height: 1.62; overflow-wrap: anywhere; }
+.message.user .message-body { white-space: pre-wrap; }
+.message-body > :first-child { margin-top: 0; }
+.message-body > :last-child { margin-bottom: 0; }
+.message-body p, .message-body ul, .message-body ol, .message-body blockquote,
+.message-body .table-scroll, .message-body .code-block {
+  margin: 0 0 0.9em;
+}
+.message-body h1, .message-body h2, .message-body h3,
+.message-body h4, .message-body h5, .message-body h6 {
+  margin: 1.25em 0 0.48em;
+  color: #f2f6f8;
+  line-height: 1.25;
+  letter-spacing: -0.018em;
+}
+.message-body h1 { font-size: 1.55em; }
+.message-body h2 { font-size: 1.35em; }
+.message-body h3 { font-size: 1.18em; }
+.message-body h4, .message-body h5, .message-body h6 { font-size: 1em; }
+.message-body ul, .message-body ol { padding-left: 1.55em; }
+.message-body li + li { margin-top: 0.26em; }
+.message-body blockquote {
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid #465967;
+  color: #aebac4;
+}
+.message-body hr { margin: 1.2em 0; border: 0; border-top: 1px solid #2e3a45; }
+.message-body strong { color: #f2f5f7; }
+.inline-code {
+  border: 1px solid #2b3944;
+  border-radius: 5px;
+  padding: 0.08em 0.32em;
+  background: #0a0f14;
+  color: #c4ead9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+.markdown-link {
+  color: #8fd8bc;
+  text-decoration: underline;
+  text-decoration-color: rgba(143, 216, 188, 0.48);
+  text-underline-offset: 0.16em;
+  cursor: help;
+}
+.markdown-link::after { content: " ↗"; font-size: 0.72em; text-decoration: none; }
+.unsafe-link { color: #d9a49d; text-decoration-style: dotted; }
+.unsafe-link::after { content: " blocked"; font-size: 0.68em; }
+.omitted-image { color: #a8b2ba; font-style: italic; }
+.task-list-item { list-style: none; margin-left: -1.42em; }
+.task {
+  display: inline-grid;
+  place-items: center;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.42em;
+  border: 1px solid #586a77;
+  border-radius: 3px;
+  color: #0b1712;
+  font-size: 0.78em;
+  vertical-align: -0.08em;
+}
+.task.checked { border-color: #72c39d; background: #72c39d; }
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.message-body table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.92em; }
+.message-body th, .message-body td {
+  min-width: 7rem;
+  border: 1px solid #2b3944;
+  padding: 0.48em 0.65em;
+  text-align: left;
+  vertical-align: top;
+}
+.message-body th { background: #121a21; color: #edf2f5; font-weight: 700; }
+.message-body tr:nth-child(even) td { background: rgba(22, 30, 37, 0.56); }
+.message-body .align-center { text-align: center; }
+.message-body .align-right { text-align: right; }
+.code-block {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #293641;
+  border-radius: 10px;
+  background: #080d12;
+}
+.code-block.streaming { border-color: #4c4636; }
+.code-block figcaption {
+  display: flex;
+  min-height: 35px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 7px 5px 12px;
+  border-bottom: 1px solid #293641;
+  background: #111820;
+}
+.code-language {
+  color: #93a4b1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 650;
+}
+.copy-code {
+  min-height: 25px;
+  padding: 0 9px;
+  border: 1px solid #344551;
+  border-radius: 6px;
+  background: #172129;
+  color: #cbd5dc;
+  font-size: 11px;
+}
+.copy-code:hover:not(:disabled) { background: #202d37; }
+.code-block pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 14px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  color: #dce6ec;
+  font: 12px/1.58 ui-monospace, SFMono-Regular, Menlo, monospace;
+  tab-size: 2;
+}
+.code-block code { white-space: pre; }
+.copy-fallback { position: fixed; inset: -10000px auto auto -10000px; width: 1px; height: 1px; }
 .message.assistant .message-body:empty::after { content: "Waiting for Codex…"; color: #6f7c86; font-style: italic; }
 .message-terminal { margin: 9px 0 0; color: #7f8d98; font-size: 11px; }
 .message-terminal.completed { color: #72c39d; }
@@ -273,7 +395,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   .status button { grid-column: 2; justify-self: start; min-height: 36px; }
 }`;
 
-export const JAVASCRIPT = `(() => {
+export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   "use strict";
 
   const repositoryForm = document.querySelector("#repository-form");
@@ -292,8 +414,8 @@ export const JAVASCRIPT = `(() => {
   const statusDetail = document.querySelector("#status-detail");
   const retry = document.querySelector("#retry");
 
-  let assistantBody = null;
-  let assistantTerminal = null;
+  const assistantMessages = [];
+  let activeAssistant = null;
   let sessionReady = false;
   let turnActive = false;
 
@@ -322,7 +444,7 @@ export const JAVASCRIPT = `(() => {
     const label = document.createElement("div");
     label.className = "message-role";
     label.textContent = role === "user" ? "You" : "Codex";
-    const body = document.createElement("p");
+    const body = document.createElement(role === "user" ? "p" : "div");
     body.className = "message-body";
     body.textContent = text;
     article.append(label, body);
@@ -334,14 +456,15 @@ export const JAVASCRIPT = `(() => {
       article.append(terminal);
     }
     transcript.append(article);
-    return { body, terminal };
+    return { body, terminal, source: text };
   };
 
   const setTurnTerminal = (event) => {
-    if (!assistantTerminal) return;
-    assistantTerminal.hidden = false;
-    assistantTerminal.className = "message-terminal " + event.status;
-    assistantTerminal.textContent = event.status === "completed"
+    if (!activeAssistant) return;
+    globalThis.vantageRenderMarkdown(activeAssistant.body, activeAssistant.source);
+    activeAssistant.terminal.hidden = false;
+    activeAssistant.terminal.className = "message-terminal " + event.status;
+    activeAssistant.terminal.textContent = event.status === "completed"
       ? "Completed"
       : event.status === "interrupted"
       ? "Interrupted"
@@ -371,8 +494,8 @@ export const JAVASCRIPT = `(() => {
         turnActive = true;
         makeMessage("user", event.prompt);
         const assistant = makeMessage("assistant", "");
-        assistantBody = assistant.body;
-        assistantTerminal = assistant.terminal;
+        assistantMessages.push(assistant);
+        activeAssistant = assistant;
         promptInput.value = "";
         setComposerReady(false);
         setStatus("running", "Submitting prompt", "Waiting for native Codex acceptance.");
@@ -389,9 +512,10 @@ export const JAVASCRIPT = `(() => {
         setStatus("running", "Stopping Codex", "Waiting for Codex to report the terminal state.");
         break;
       case "assistant_delta":
-        if (assistantBody && typeof event.delta === "string") {
-          assistantBody.textContent += event.delta;
-          assistantBody.scrollIntoView({ block: "nearest" });
+        if (activeAssistant && typeof event.delta === "string") {
+          activeAssistant.source += event.delta;
+          globalThis.vantageRenderMarkdown(activeAssistant.body, activeAssistant.source);
+          activeAssistant.body.scrollIntoView({ block: "nearest" });
         }
         break;
       case "turn_terminal":
@@ -455,8 +579,8 @@ export const JAVASCRIPT = `(() => {
   retry.addEventListener("click", () => {
     sessionReady = false;
     turnActive = false;
-    assistantBody = null;
-    assistantTerminal = null;
+    assistantMessages.length = 0;
+    activeAssistant = null;
     transcript.replaceChildren();
     conversation.hidden = true;
     repositoryResult.hidden = true;
