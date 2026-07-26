@@ -1,10 +1,14 @@
 # Architecture overview
 
-Status: **Accepted for the session-only Milestone 1**
+Status: **Accepted for the session-only conversation and Milestone 2 rich-response extension**
 
 This document owns the technical shape of the first implementation. The
 [milestone map](../milestones/01-codex-chat.md) owns the delivery boundary and sequencing; the
 [vertical-slice contract](vertical-slice.md) owns the user journey and behavior.
+
+The [rich response rendering contract](rich-response-rendering.md) extends the proven transcript
+with safe streamed Markdown presentation. It does not expand or replace the native session
+boundary described here.
 
 ## Architectural outcome
 
@@ -30,6 +34,7 @@ credentials, or speaks the native app-server protocol directly.
 | Runtime policy | Fixed read-only access; no approval or mutation flow |
 | Persistence | None; app close intentionally discards the conversation |
 | Protocol surface | Only requests and events exercised by the session-only conversation |
+| Assistant presentation | One raw source per response projected into inert Markdown DOM snapshots |
 
 The [decision log](decisions.md) records the scope reduction and preserves deferred design choices.
 
@@ -134,7 +139,8 @@ and the next launch begins without claiming that the repository or conversation 
 - Keep Codex authentication and sensitive environment values out of WebView payloads and ordinary
   diagnostics.
 - Reject duplicate prompt submission while a turn is unresolved or active.
-- Render provider text without executing markup.
+- Render assistant Markdown through the fixed inert-DOM contract without executing markup,
+  navigating, or fetching provider resources; keep user prompts literal.
 - Exercise idle and active window-close cleanup on the primary development platform.
 
 ## Validation boundary
@@ -154,6 +160,11 @@ The broader [Codex integration](codex-app-server.md) and
 [reliability and validation](reliability.md) documents preserve possible future designs for saved
 projects and threads, model controls, approvals, rich activity, persistence, restart recovery, and
 operational hardening. They do not expand Milestone 1.
+
+The [rich response rendering contract](rich-response-rendering.md) owns the current Markdown,
+code-copy, link, resource, and streaming-presentation decisions. Mermaid and sanitized SVG are a
+separate Milestone 2 issue; arbitrary HTML, remote media, widgets, navigation, file actions, and
+terminal integration remain deferred.
 
 ## References
 

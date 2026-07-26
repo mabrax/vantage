@@ -9,6 +9,7 @@ the long-term idea visible without making every future surface a requirement of 
 | --- | --- | --- |
 | [Product foundation](FOUNDATION.md) | What should Vantage become, and why? | Low |
 | [Architecture overview](architecture/README.md) | How is the current system shaped? | Medium |
+| [Rich response rendering](architecture/rich-response-rendering.md) | How does untrusted streamed Markdown become inert DOM? | Medium |
 | [Milestone 1 map](milestones/01-codex-chat.md) | What is in the first product vertical and how is it sequenced? | High |
 | [Milestone 2 map](milestones/02-rich-markdown.md) | How does the transcript become a safe rich-response surface? | High |
 | [First vertical slice](architecture/vertical-slice.md) | How should the session-only conversation behave? | High |
