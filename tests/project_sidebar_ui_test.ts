@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { CSS, HTML, JAVASCRIPT } from "../src/ui.ts";
+import { CSS, HTML, JAVASCRIPT, transitionProjectRemoval } from "../src/ui.ts";
 
 Deno.test("saved-project sidebar exposes the complete empty, unavailable, selection, and removal surface", () => {
   for (
@@ -79,4 +79,46 @@ Deno.test("registry busy state guards and disables every competing project mutat
     JAVASCRIPT,
     /finally \{\s+setRepositoryBusy\(false\);\s+\}/,
   );
+});
+
+Deno.test("non-selected removal preserves the selected active-turn projection while selected removal resets it", () => {
+  const activeAssistant = { source: "partial selected response" };
+  const assistantMessages = [activeAssistant];
+  const state = {
+    sessionReady: true,
+    turnActive: true,
+    readyRepository: "/selected",
+    activeAssistant,
+    assistantMessages,
+    composerEnabled: false,
+  };
+
+  const nonSelected = transitionProjectRemoval(
+    "project-other",
+    "project-selected",
+    state,
+  );
+  assert.deepEqual(nonSelected, {
+    ...state,
+    removesSelectedProject: false,
+    shouldResetConversation: false,
+  });
+  assert.strictEqual(nonSelected.activeAssistant, activeAssistant);
+  assert.strictEqual(nonSelected.assistantMessages, assistantMessages);
+
+  const selected = transitionProjectRemoval(
+    "project-selected",
+    "project-selected",
+    state,
+  );
+  assert.deepEqual(selected, {
+    sessionReady: false,
+    turnActive: false,
+    readyRepository: null,
+    activeAssistant: null,
+    assistantMessages: [],
+    composerEnabled: false,
+    removesSelectedProject: true,
+    shouldResetConversation: true,
+  });
 });

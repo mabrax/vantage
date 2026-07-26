@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { relative } from "node:path";
 import type { CodexSession, NativeTurnEvent } from "../src/codex_client.ts";
 import { VantageError } from "../src/errors.ts";
+import type { SessionEvent } from "../src/events.ts";
 import { PersistenceOwner } from "../src/persistence.ts";
 import {
   inspectRegisteredRepository,
@@ -48,6 +49,7 @@ interface RegistryHarness {
   readonly registry: ProjectRegistryController;
   readonly clients: FakeCodex[];
   readonly log: string[];
+  readonly events: SessionEvent[];
 }
 
 async function createHarness(
@@ -57,8 +59,11 @@ async function createHarness(
   const persistence = await PersistenceOwner.open(databasePath);
   const clients: FakeCodex[] = [];
   const log: string[] = [];
+  const events: SessionEvent[] = [];
   const session = new SessionController(
-    () => {},
+    (event) => {
+      events.push(event);
+    },
     (repository) => {
       const client = new FakeCodex(repository, log);
       clients.push(client);
@@ -81,7 +86,7 @@ async function createHarness(
     })(),
   );
   await registry.initialize();
-  return { persistence, session, registry, clients, log };
+  return { persistence, session, registry, clients, log, events };
 }
 
 async function makeGitRepository(
@@ -262,6 +267,8 @@ Deno.test("removal requires confirmation, reaps only the selected process, and n
     });
     await harness.registry.addProject(second);
     const activeSecond = harness.clients.at(-1)!;
+    await harness.session.submitPrompt("selected project stays active");
+    assert.equal(harness.session.snapshot().phase, "running");
 
     await assert.rejects(
       () => harness.registry.removeProject("project-first", false),
@@ -273,6 +280,34 @@ Deno.test("removal requires confirmation, reaps only the selected process, and n
 
     await harness.registry.removeProject("project-first", true);
     assert.equal(activeSecond.shutdowns, 0);
+    assert.equal(harness.session.snapshot().phase, "running");
+    activeSecond.onTurnEvent?.({
+      type: "delta",
+      delta: "selected response continues",
+    });
+    activeSecond.onTurnEvent?.({
+      type: "terminal",
+      status: "completed",
+      canContinue: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(
+      harness.events.slice(-2),
+      [
+        {
+          type: "assistant_delta",
+          delta: "selected response continues",
+        },
+        {
+          type: "turn_terminal",
+          status: "completed",
+          message: undefined,
+          action: undefined,
+          canContinue: true,
+        },
+      ],
+    );
+    assert.equal(harness.session.snapshot().phase, "completed");
     assert.deepEqual(
       await Deno.readFile(`${first}/sentinel.txt`),
       firstSentinel,

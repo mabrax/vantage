@@ -1,5 +1,43 @@
 import { MARKDOWN_JAVASCRIPT } from "./markdown.ts";
 
+export interface ProjectRemovalUiState {
+  readonly sessionReady: boolean;
+  readonly turnActive: boolean;
+  readonly readyRepository: string | null;
+  readonly activeAssistant: unknown | null;
+  readonly assistantMessages: readonly unknown[];
+  readonly composerEnabled: boolean;
+}
+
+export interface ProjectRemovalTransition extends ProjectRemovalUiState {
+  readonly removesSelectedProject: boolean;
+  readonly shouldResetConversation: boolean;
+}
+
+export function transitionProjectRemoval(
+  projectId: string,
+  selectedProjectId: string | null,
+  state: ProjectRemovalUiState,
+): ProjectRemovalTransition {
+  if (projectId !== selectedProjectId) {
+    return {
+      ...state,
+      removesSelectedProject: false,
+      shouldResetConversation: false,
+    };
+  }
+  return {
+    sessionReady: false,
+    turnActive: false,
+    readyRepository: null,
+    activeAssistant: null,
+    assistantMessages: [],
+    composerEnabled: false,
+    removesSelectedProject: true,
+    shouldResetConversation: true,
+  };
+}
+
 export const HTML = `<!doctype html>
 <html lang="en">
   <head>
@@ -665,6 +703,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   "use strict";
 
+  const transitionProjectRemoval = (${transitionProjectRemoval.toString()});
   const nativeBindings = globalThis.bindings;
   const repositoryForm = document.querySelector("#repository-form");
   const repositoryInput = document.querySelector("#repository-path");
@@ -849,6 +888,19 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
       error && error.message ? error.message : fallback,
       error && error.action ? error.action : "Retry after checking the local prerequisite.",
       true,
+    );
+  };
+
+  const nonSelectedRemovalFailure = (result) => {
+    const error = result && result.error;
+    const message = error && error.message
+      ? error.message
+      : "The non-selected project could not be removed.";
+    const action = error && error.action ? " " + error.action : "";
+    setStatus(
+      "running",
+      "Codex is working",
+      "The selected response is still running. " + message + action,
     );
   };
 
@@ -1085,16 +1137,40 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   removeConfirm.addEventListener("click", async () => {
     if (!nativeBindings || registryBusy || removalProjectId === null) return;
     const projectId = removalProjectId;
+    const removalTransition = transitionProjectRemoval(
+      projectId,
+      registry.selectedProjectId,
+      {
+        sessionReady,
+        turnActive,
+        readyRepository,
+        activeAssistant,
+        assistantMessages,
+        composerEnabled: !promptInput.disabled,
+      },
+    );
     closeRemoval();
-    resetConversation();
+    if (removalTransition.shouldResetConversation) {
+      resetConversation();
+    }
     setRepositoryBusy(true);
-    setStatus("running", "Removing saved project", "Stopping any selected Vantage-owned process before forgetting Vantage metadata.");
+    if (removalTransition.removesSelectedProject) {
+      setStatus("running", "Removing saved project", "Stopping the selected Vantage-owned process before forgetting Vantage metadata.");
+    }
     try {
       const result = await nativeBindings.removeProject(projectId, true);
       if (result && result.ok) applyRegistry(result.snapshot);
-      else hostFailure(result, "The project could not be removed.");
+      else if (!removalTransition.removesSelectedProject && turnActive) {
+        nonSelectedRemovalFailure(result);
+      } else {
+        hostFailure(result, "The project could not be removed.");
+      }
     } catch (error) {
-      hostFailure({ error }, "The project could not be removed.");
+      if (!removalTransition.removesSelectedProject && turnActive) {
+        nonSelectedRemovalFailure({ error });
+      } else {
+        hostFailure({ error }, "The project could not be removed.");
+      }
     } finally {
       setRepositoryBusy(false);
     }
