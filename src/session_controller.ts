@@ -30,6 +30,7 @@ export class SessionController {
   #repository: string | null = null;
   #codex: CodexSession | null = null;
   #nativeEvents = Promise.resolve();
+  #sessionGeneration = 0;
 
   constructor(
     readonly eventSink: EventSink,
@@ -43,7 +44,18 @@ export class SessionController {
     return { phase: this.#phase, repository: this.#repository };
   }
 
-  async startSession(input: unknown): Promise<SessionSnapshot> {
+  canReplaceSession(): boolean {
+    return this.#phase !== "starting" &&
+      this.#phase !== "turn_starting" &&
+      this.#phase !== "running" &&
+      this.#phase !== "interrupting" &&
+      this.#phase !== "closed";
+  }
+
+  async startSession(
+    input: unknown,
+    expectedCanonicalRoot?: string,
+  ): Promise<SessionSnapshot> {
     if (
       this.#phase === "starting" ||
       this.#phase === "turn_starting" ||
@@ -58,15 +70,27 @@ export class SessionController {
       );
     }
 
+    const generation = ++this.#sessionGeneration;
     await this.#disposeCodex();
     this.#phase = "starting";
     this.#repository = null;
 
     try {
       const repository = await this.repositoryValidator(input);
+      if (
+        expectedCanonicalRoot !== undefined &&
+        repository !== expectedCanonicalRoot
+      ) {
+        throw new VantageError(
+          "repository",
+          "The saved path now resolves to a different Git repository.",
+          "Restore the original canonical root, or remove and explicitly re-add the new project.",
+        );
+      }
       const codex = this.codexFactory(repository);
       this.#codex = codex;
       await codex.initialize();
+      if (generation !== this.#sessionGeneration) return this.snapshot();
       this.#repository = repository;
       this.#phase = "ready";
       await this.eventSink({ type: "repository_ready", repository });
@@ -117,9 +141,10 @@ export class SessionController {
     await this.eventSink({ type: "turn_pending", prompt });
 
     try {
+      const generation = this.#sessionGeneration;
       await this.#codex.startTurn(prompt, (event) => {
         this.#nativeEvents = this.#nativeEvents.then(() =>
-          this.#onTurnEvent(event)
+          this.#onTurnEvent(event, generation)
         );
       });
       if (this.#isClosed()) return this.snapshot();
@@ -181,12 +206,44 @@ export class SessionController {
 
   async close(): Promise<void> {
     if (this.#phase === "closed") return;
+    this.#sessionGeneration++;
     this.#phase = "closed";
     await this.#disposeCodex();
   }
 
-  async #onTurnEvent(event: NativeTurnEvent): Promise<void> {
-    if (this.#phase === "closed") return;
+  async clearSession(): Promise<SessionSnapshot> {
+    if (!this.canReplaceSession()) {
+      throw new VantageError(
+        "invalid_command",
+        "The active project cannot be cleared right now.",
+        "Wait for the current operation to finish.",
+      );
+    }
+    return await this.reapSession();
+  }
+
+  async reapSession(): Promise<SessionSnapshot> {
+    if (this.#phase === "closed") {
+      throw new VantageError(
+        "closed",
+        "The active project session is closed.",
+        "Reopen Vantage before starting another project.",
+      );
+    }
+    this.#sessionGeneration++;
+    await this.#disposeCodex();
+    this.#repository = null;
+    this.#phase = "empty";
+    return this.snapshot();
+  }
+
+  async #onTurnEvent(
+    event: NativeTurnEvent,
+    generation: number,
+  ): Promise<void> {
+    if (this.#phase === "closed" || generation !== this.#sessionGeneration) {
+      return;
+    }
     if (event.type === "accepted") {
       if (this.#phase === "turn_starting") {
         this.#phase = "running";

@@ -13,7 +13,9 @@ import {
   type PersistenceRequest,
   type PersistenceResponse,
   type ProjectRecord,
+  type ProjectRegistrySnapshot,
   type ReconcileInput,
+  type RegisteredProjectRecord,
   type ScopedConversationInput,
   type SerializedStorageError,
   type SetNativeThreadInput,
@@ -67,7 +69,20 @@ function perform(operation: PersistenceOperation): unknown {
     case "create_project":
       return createProject(db, operation.input);
     case "remove_project":
-      return removeProject(db, operation.projectId);
+      return removeProject(
+        db,
+        operation.projectId,
+        operation.nextSelectedProjectId,
+        operation.updatedAt,
+      );
+    case "set_selected_project":
+      return setSelectedProject(
+        db,
+        operation.projectId,
+        operation.updatedAt,
+      );
+    case "read_project_registry":
+      return readProjectRegistry(db);
     case "set_native_thread":
       return setNativeThread(db, operation.input);
     case "mark_native_non_resumable":
@@ -253,13 +268,108 @@ function createProject(db: DatabaseSync, input: CreateProjectInput): void {
   });
 }
 
-function removeProject(db: DatabaseSync, projectId: string): void {
+const SELECTED_PROJECT_PREFERENCE = "selected_project_id";
+
+function removeProject(
+  db: DatabaseSync,
+  projectId: string,
+  nextSelectedProjectId?: string | null,
+  updatedAt?: number,
+): void {
   transaction(db, () => {
     const result = db.prepare("DELETE FROM projects WHERE id = ?").run(
       projectId,
     );
     if (result.changes !== 1) throw scopeFailure();
+    if (nextSelectedProjectId === undefined) {
+      const preference = selectedProjectPreference(db);
+      if (preference === projectId) {
+        db.prepare("DELETE FROM preferences WHERE key = ?").run(
+          SELECTED_PROJECT_PREFERENCE,
+        );
+      }
+      return;
+    }
+    writeSelectedProject(db, nextSelectedProjectId, updatedAt!);
   });
+}
+
+function setSelectedProject(
+  db: DatabaseSync,
+  projectId: string | null,
+  updatedAt: number,
+): void {
+  transaction(db, () => {
+    writeSelectedProject(db, projectId, updatedAt);
+  });
+}
+
+function writeSelectedProject(
+  db: DatabaseSync,
+  projectId: string | null,
+  updatedAt: number,
+): void {
+  if (projectId === null) {
+    db.prepare("DELETE FROM preferences WHERE key = ?").run(
+      SELECTED_PROJECT_PREFERENCE,
+    );
+    return;
+  }
+  const exists = db.prepare("SELECT 1 FROM projects WHERE id = ?").get(
+    projectId,
+  );
+  if (!exists) throw scopeFailure();
+  db.prepare(
+    `INSERT INTO preferences (key, value_json, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE
+       SET value_json = excluded.value_json,
+           updated_at = excluded.updated_at`,
+  ).run(SELECTED_PROJECT_PREFERENCE, JSON.stringify(projectId), updatedAt);
+}
+
+function readProjectRegistry(db: DatabaseSync): ProjectRegistrySnapshot {
+  const rows = db.prepare(
+    `SELECT
+       p.id AS project_id, p.canonical_root, p.created_at AS project_created_at,
+       c.id AS conversation_id, c.native_thread_id, c.native_resume_state,
+       c.native_resume_failure, c.created_at AS conversation_created_at
+     FROM projects p
+     JOIN conversations c ON c.project_id = p.id
+     ORDER BY p.created_at, p.id`,
+  ).all() as Record<string, unknown>[];
+  const projects = rows.map((row) => ({
+    project: {
+      id: String(row.project_id),
+      canonicalRoot: String(row.canonical_root),
+      createdAt: Number(row.project_created_at),
+    } satisfies ProjectRecord,
+    conversation: {
+      id: String(row.conversation_id),
+      projectId: String(row.project_id),
+      nativeThreadId: nullableString(row.native_thread_id),
+      nativeResumeState: row.native_resume_state,
+      nativeResumeFailure: row.native_resume_failure,
+      createdAt: Number(row.conversation_created_at),
+    },
+  } as RegisteredProjectRecord));
+  const selectedProjectId = selectedProjectPreference(db);
+  return {
+    projects,
+    selectedProjectId: selectedProjectId !== null &&
+        projects.some((entry) => entry.project.id === selectedProjectId)
+      ? selectedProjectId
+      : null,
+  };
+}
+
+function selectedProjectPreference(db: DatabaseSync): string | null {
+  const row = db.prepare(
+    "SELECT value_json FROM preferences WHERE key = ?",
+  ).get(SELECTED_PROJECT_PREFERENCE) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  const value = JSON.parse(String(row.value_json));
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function setNativeThread(db: DatabaseSync, input: SetNativeThreadInput): void {

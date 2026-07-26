@@ -11,10 +11,12 @@ scope and sequencing:
 - [Milestone 3](../milestones/03-saved-projects-and-conversations.md) promotes
   saved projects and exact native conversation resume.
 
-The current UI remains session-only until issues #26 and #27 consume the
-accepted [saved-project/conversation contract](saved-conversations.md). Issue
-#25 supplies the native proof and durable storage foundation without adding
-their sidebar, switching, or relaunch surfaces.
+Issue #26 consumes the saved-project half of the accepted
+[saved-project/conversation contract](saved-conversations.md): the UI persists
+canonical project registrations, order, selection, availability, and explicit
+removal in its sidebar. The selected chat remains session-only until issue #27
+adds durable transcript projection, exact native resume, and relaunch
+conversation continuation.
 
 ## Architectural outcome
 
@@ -25,8 +27,8 @@ turn, and translates the small native protocol surface needed by the product.
 
 One serialized persistence worker owns Vantage's local SQLite connection. It is
 a sibling of the native session controller: session events become typed,
-project-scoped persistence operations, while database snapshots become
-validated host/UI projections. Neither side receives the other's authority.
+project-scoped persistence operations, while database snapshots become validated
+host/UI projections. Neither side receives the other's authority.
 
 Codex remains the source of native thread and terminal truth. Git repositories
 remain the source of repository truth. Vantage owns only its project registry,
@@ -35,19 +37,19 @@ preferences.
 
 ## Current decisions
 
-| Area | Accepted decision |
-| --- | --- |
-| Desktop runtime | Deno Desktop on the primary development platform |
-| UI boundary | WebView presentation with validated host commands, snapshots, and ordered events |
-| Provider | Codex through one local Vantage-owned `codex app-server` process |
-| Repository | Validated canonical Git root; unique persisted registration in Milestone 3 |
-| Conversation | One Vantage conversation per project, mapped to an exact durable native thread |
-| Live session | Disposable process/connection, distinct from durable conversation identity |
-| Turns | One live/native turn globally; one unresolved durable turn per conversation; recovered read-only history may coexist across projects |
-| Runtime policy | Fixed `approvalPolicy: never` and read-only sandbox |
-| Persistence | Strict versioned SQLite schema through one serialized module worker |
-| Native resume | `thread/resume` by persisted ID; returned ID must match; no transcript imitation |
-| Assistant presentation | Ordered raw source re-rendered into inert Markdown and bounded visual DOM |
+| Area                   | Accepted decision                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Desktop runtime        | Deno Desktop on the primary development platform                                                                                     |
+| UI boundary            | WebView presentation with validated host commands, snapshots, and ordered events                                                     |
+| Provider               | Codex through one local Vantage-owned `codex app-server` process                                                                     |
+| Repository             | Validated canonical Git root; unique persisted registration in Milestone 3                                                           |
+| Conversation           | One Vantage conversation per project, mapped to an exact durable native thread                                                       |
+| Live session           | Disposable process/connection, distinct from durable conversation identity                                                           |
+| Turns                  | One live/native turn globally; one unresolved durable turn per conversation; recovered read-only history may coexist across projects |
+| Runtime policy         | Fixed `approvalPolicy: never` and read-only sandbox                                                                                  |
+| Persistence            | Strict versioned SQLite schema through one serialized module worker                                                                  |
+| Native resume          | `thread/resume` by persisted ID; returned ID must match; no transcript imitation                                                     |
+| Assistant presentation | Ordered raw source re-rendered into inert Markdown and bounded visual DOM                                                            |
 
 The [decision log](decisions.md) records why these choices were made and which
 earlier deferrals they supersede.
@@ -173,11 +175,10 @@ constrains it.
 - Reject duplicate prompt submission while acceptance or a turn is unresolved.
 - Persist raw source only, then reconstruct presentation through the inert-DOM
   renderer and unchanged offline CSP.
-- Never replay uncertain prompts, infer terminal success, backfill an
-  incomplete stream speculatively, or attach a late event across projects.
+- Never replay uncertain prompts, infer terminal success, backfill an incomplete
+  stream speculatively, or attach a late event across projects.
 - Reap the prior owned process before activating another live project.
-- Preserve corrupt or incompatible database bytes and stop mutation
-  actionably.
+- Preserve corrupt or incompatible database bytes and stop mutation actionably.
 
 ## Validation boundary
 
@@ -192,9 +193,9 @@ Validation is attached to consumer-visible paths:
   process cleanup.
 
 Broad provider abstraction, synchronization, write-enabled work, approvals,
-multiple conversations, generalized event sourcing, compatibility
-certification, multi-platform claims, and repair tooling remain outside this
-architecture boundary.
+multiple conversations, generalized event sourcing, compatibility certification,
+multi-platform claims, and repair tooling remain outside this architecture
+boundary.
 
 ## Documents
 

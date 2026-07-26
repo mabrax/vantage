@@ -1,5 +1,11 @@
 import { createCodexSession } from "./codex_client.ts";
+import { asVantageError, VantageError } from "./errors.ts";
 import type { SessionEvent } from "./events.ts";
+import { PersistenceOwner, StorageError } from "./persistence.ts";
+import {
+  ProjectRegistryController,
+  type ProjectRegistryView,
+} from "./project_registry.ts";
 import { SessionController } from "./session_controller.ts";
 import { CSS, HTML, JAVASCRIPT } from "./ui.ts";
 
@@ -75,10 +81,54 @@ const sendEvent = (event: SessionEvent): Promise<void> => {
 };
 
 const controller = new SessionController(sendEvent, createCodexSession);
+let registry: ProjectRegistryController | null = null;
 
-window.bind("startSession", async (path: unknown) => {
-  await controller.startSession(path);
-  return null;
+window.bind("initializeApp", async () => {
+  try {
+    if (registry === null) {
+      const databasePath = await applicationDatabasePath();
+      const persistence = await PersistenceOwner.open(databasePath);
+      const candidate = new ProjectRegistryController(persistence, controller);
+      try {
+        await candidate.initialize();
+        registry = candidate;
+      } catch (error) {
+        await persistence.close().catch(() => undefined);
+        throw error;
+      }
+    }
+    return success(registry.snapshot());
+  } catch (error) {
+    return failure(error);
+  }
+});
+window.bind("activateSelectedProject", async () => {
+  return await registryCommand((savedProjects) =>
+    savedProjects.activateSelectedProject()
+  );
+});
+window.bind("addProject", async (path: unknown) => {
+  return await registryCommand((savedProjects) =>
+    savedProjects.addProject(path)
+  );
+});
+window.bind("selectProject", async (projectId: unknown) => {
+  return await registryCommand((savedProjects) =>
+    savedProjects.selectProject(projectId)
+  );
+});
+window.bind("refreshProjects", async () => {
+  return await registryCommand((savedProjects) =>
+    savedProjects.refreshProjects()
+  );
+});
+window.bind("removeProject", async (
+  projectId: unknown,
+  confirmed: unknown,
+) => {
+  return await registryCommand((savedProjects) =>
+    savedProjects.removeProject(projectId, confirmed)
+  );
 });
 window.bind("submitPrompt", async (prompt: unknown) => {
   await controller.submitPrompt(prompt);
@@ -95,10 +145,100 @@ window.addEventListener("close", (event) => {
   event.preventDefault();
   closing = true;
   void (async () => {
-    await controller.close();
+    if (registry) {
+      await registry.close();
+    } else {
+      await controller.close();
+    }
     window.close();
   })();
 });
+
+interface HostSuccess {
+  readonly ok: true;
+  readonly snapshot: ProjectRegistryView;
+}
+
+interface HostFailure {
+  readonly ok: false;
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+    readonly action: string;
+  };
+}
+
+async function registryCommand(
+  command: (
+    savedProjects: ProjectRegistryController,
+  ) => Promise<ProjectRegistryView>,
+): Promise<HostSuccess | HostFailure> {
+  if (!registry) {
+    return failure(
+      new VantageError(
+        "invalid_command",
+        "Saved projects are not ready.",
+        "Reload Vantage and retry after local storage opens.",
+      ),
+    );
+  }
+  try {
+    return success(await command(registry));
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+function success(snapshot: ProjectRegistryView): HostSuccess {
+  return { ok: true, snapshot };
+}
+
+function failure(error: unknown): HostFailure {
+  if (error instanceof StorageError) {
+    return {
+      ok: false,
+      error: {
+        code: error.code,
+        message: error.message,
+        action: error.action,
+      },
+    };
+  }
+  const result = asVantageError(error);
+  return {
+    ok: false,
+    error: {
+      code: result.code,
+      message: result.message,
+      action: result.action,
+    },
+  };
+}
+
+async function applicationDatabasePath(): Promise<string> {
+  const override = Deno.env.get("VANTAGE_DATABASE_PATH");
+  if (override) return override;
+  const home = Deno.env.get("HOME");
+  if (!home) {
+    throw new StorageError(
+      "storage_open",
+      "Vantage could not locate the per-user application-support directory.",
+      "Restore the HOME environment value and reopen Vantage.",
+    );
+  }
+  const directory = `${home}/Library/Application Support/Vantage`;
+  try {
+    await Deno.mkdir(directory, { recursive: true, mode: 0o700 });
+  } catch (error) {
+    throw new StorageError(
+      "storage_open",
+      "Vantage could not create its application-support directory.",
+      "Restore write access to your Library/Application Support directory and retry.",
+      { cause: error },
+    );
+  }
+  return `${directory}/vantage.sqlite3`;
+}
 
 function asset(body: string, contentType: string): Response {
   return new Response(body, {

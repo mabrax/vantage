@@ -21,10 +21,10 @@
     "backend": "webview"
   },
   "tasks": {
-    "check": "deno fmt --check && deno lint && deno check src/main.ts src/persistence.ts src/persistence_worker.ts scripts/real_turn_smoke.ts scripts/native_resume_proof.ts && deno test -A",
-    "dev": "deno desktop --hmr --allow-read --allow-run --allow-env src/main.ts",
+    "check": "deno fmt --check && deno lint && deno check src/main.ts src/persistence.ts src/persistence_worker.ts src/project_registry.ts scripts/real_turn_smoke.ts scripts/native_resume_proof.ts && deno test -A",
+    "dev": "deno desktop --hmr --allow-read --allow-write --allow-run --allow-env src/main.ts",
     "native-resume-proof": "deno run --allow-read --allow-run --allow-env scripts/native_resume_proof.ts",
-    "package": "deno desktop --allow-read --allow-run --allow-env --output dist/Vantage.app src/main.ts",
+    "package": "deno desktop --allow-read --allow-write --allow-run --allow-env --include src/persistence_worker.ts --output dist/Vantage.app src/main.ts",
     "smoke": "deno run --allow-read --allow-run --allow-env scripts/real_turn_smoke.ts",
     "test": "deno test -A"
   }

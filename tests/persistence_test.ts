@@ -594,3 +594,43 @@ Deno.test("removal forgets only Vantage state and re-add is fresh", async () => 
     await owner.close();
   });
 });
+
+Deno.test("project registry order and selected preference survive reopen and update atomically on removal", async () => {
+  await withDatabase(async (path) => {
+    let owner = await PersistenceOwner.open(path);
+    const first = {
+      ...projectInput("registry-z", "/repo/registered-first"),
+      createdAt: 10,
+    };
+    const second = {
+      ...projectInput("registry-a", "/repo/registered-second"),
+      createdAt: 11,
+    };
+    await owner.createProjectWithConversation(first);
+    await owner.createProjectWithConversation(second);
+    await owner.setSelectedProject(second.projectId, 12);
+    await owner.close();
+
+    owner = await PersistenceOwner.open(path);
+    let registry = await owner.readProjectRegistry();
+    assert.deepEqual(
+      registry.projects.map((entry) => entry.project.id),
+      [first.projectId, second.projectId],
+    );
+    assert.equal(registry.selectedProjectId, second.projectId);
+
+    await owner.removeProject(second.projectId, first.projectId, 13);
+    registry = await owner.readProjectRegistry();
+    assert.deepEqual(
+      registry.projects.map((entry) => entry.project.id),
+      [first.projectId],
+    );
+    assert.equal(registry.selectedProjectId, first.projectId);
+    await owner.removeProject(first.projectId, null, 14);
+    assert.deepEqual(await owner.readProjectRegistry(), {
+      projects: [],
+      selectedProjectId: null,
+    });
+    await owner.close();
+  });
+});

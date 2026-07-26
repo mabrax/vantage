@@ -90,6 +90,33 @@ Deno.test("invalid repositories launch no Codex process and remain retryable", a
   assert.equal(h.factoryCalls(), 1);
 });
 
+Deno.test("registered project launch rejects an identity change before Codex starts", async () => {
+  let factoryCalls = 0;
+  const events: SessionEvent[] = [];
+  const controller = new SessionController(
+    (event) => {
+      events.push(event);
+    },
+    () => {
+      factoryCalls++;
+      return new FakeCodex();
+    },
+    () => Promise.resolve("/different-canonical-root"),
+  );
+
+  const snapshot = await controller.startSession(
+    "/saved-root",
+    "/saved-root",
+  );
+  assert.equal(snapshot.phase, "failed");
+  assert.equal(factoryCalls, 0);
+  assert.equal(events[0].type, "session_failed");
+  assert.match(
+    events[0].type === "session_failed" ? events[0].message : "",
+    /different Git repository/,
+  );
+});
+
 Deno.test("only one prompt is accepted while native acceptance is pending", async () => {
   const h = harness();
   const gate = Promise.withResolvers<void>();
@@ -287,4 +314,47 @@ Deno.test("closing an idle or active session reaps the owned process", async () 
   assert.equal(active.controller.snapshot().phase, "closed");
   gate.resolve();
   await pending;
+});
+
+Deno.test("late native events from a replaced project cannot cross into the selected session", async () => {
+  const first = new FakeCodex();
+  const second = new FakeCodex();
+  const clients = [first, second];
+  const events: SessionEvent[] = [];
+  const controller = new SessionController(
+    (event) => {
+      events.push(event);
+    },
+    () => clients.shift()!,
+    (path) => Promise.resolve(String(path)),
+  );
+
+  await controller.startSession("/first");
+  await controller.submitPrompt("old project prompt");
+  first.emit({ type: "accepted" });
+  first.emit({
+    type: "terminal",
+    status: "completed",
+    canContinue: true,
+  });
+  await flushEvents();
+
+  await controller.startSession("/second");
+  const eventCount = events.length;
+  first.emit({ type: "delta", delta: "late crossed source" });
+  first.emit({
+    type: "terminal",
+    status: "failed",
+    canContinue: false,
+  });
+  await flushEvents();
+
+  assert.equal(events.length, eventCount);
+  assert.deepEqual(controller.snapshot(), {
+    phase: "ready",
+    repository: "/second",
+  });
+  assert.equal(first.shutdowns, 1);
+  assert.equal(second.shutdowns, 0);
+  await controller.close();
 });

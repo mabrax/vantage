@@ -65,6 +65,16 @@ export interface ConversationSnapshot {
   readonly turns: readonly TurnRecord[];
 }
 
+export interface RegisteredProjectRecord {
+  readonly project: ProjectRecord;
+  readonly conversation: ConversationRecord;
+}
+
+export interface ProjectRegistrySnapshot {
+  readonly projects: readonly RegisteredProjectRecord[];
+  readonly selectedProjectId: string | null;
+}
+
 export interface CreateProjectInput {
   readonly projectId: string;
   readonly conversationId: string;
@@ -118,7 +128,18 @@ export interface ReconcileInput extends ScopedConversationInput {
 export type PersistenceOperation =
   | { readonly type: "open"; readonly path: string }
   | { readonly type: "create_project"; readonly input: CreateProjectInput }
-  | { readonly type: "remove_project"; readonly projectId: string }
+  | {
+    readonly type: "remove_project";
+    readonly projectId: string;
+    readonly nextSelectedProjectId?: string | null;
+    readonly updatedAt?: number;
+  }
+  | {
+    readonly type: "set_selected_project";
+    readonly projectId: string | null;
+    readonly updatedAt: number;
+  }
+  | { readonly type: "read_project_registry" }
   | { readonly type: "set_native_thread"; readonly input: SetNativeThreadInput }
   | {
     readonly type: "mark_native_non_resumable";
