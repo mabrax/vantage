@@ -1,6 +1,6 @@
 # Reliability and validation
 
-Status: **Accepted behavioral boundary through the Milestone 3 foundation**
+Status: **Accepted behavioral boundary through Milestone 3**
 
 Milestone 1 validates the risks that can break its
 [session-only user journey](vertical-slice.md). It does not create a standalone
@@ -112,6 +112,43 @@ The saved-project registry includes focused checks for:
   and non-selected removal, and repeated commands; and
 - giving a re-added canonical root fresh Vantage project/conversation IDs
   without restoring removed Vantage metadata or claiming Codex history deletion.
+
+## Behavioral checks attached to issue #27
+
+The durable project-conversation integration includes focused checks for:
+
+- separate first turns in two projects, idle switching in both directions, and
+  confirmed active switching that reaps the source process before starting the
+  target;
+- rejection of late native acceptance, source, terminal, thread-identity,
+  process, and cleanup outcomes across project generations;
+- exact relaunch restoration of literal prompts, ordered raw assistant source,
+  native terminal truth, selected project, and composer availability;
+- exact native resume, context-dependent continuation, and explicit
+  missing/incompatible/failed resume without transcript imitation or a
+  replacement thread;
+- unavailable-root history remaining visible and read-only until the exact
+  canonical root is restored;
+- pending, accepted, streaming, process-loss, and terminal crash points
+  remaining conservative without uncertain replay or false completion; and
+- injected mapping, begin, acceptance, append, terminal, reconciliation, close,
+  and reap failures preserving durable truth and exact process cleanup.
+
+## Milestone 3 exit validation attached to issue #28
+
+The milestone exit gate combines the complete repository check with an
+identical-tree package, strict deep codesign verification, authenticated native
+resume, and computer-controlled packaged QA. Its adversarial fixtures cover
+canonical aliases, unavailable roots, corruption and incompatible migrations,
+interrupted writes and crash states, resume failures, stale events, removal
+safety, and restored hostile/rich source.
+
+Every required packaged row must pass. The gate preserves repository bytes,
+excludes unrelated processes, reaps only exact Vantage-owned processes, and
+cleans task-created packages, fixtures, databases, screenshots, and logs
+recoverably. Exact commands, revisions, native identities, process evidence,
+hashes, observations, defects, and cleanup belong in issue or pull-request
+comments rather than this architecture contract or the milestone map.
 
 ## Deferred reliability work
 

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import {
   CSS,
   deriveConversationPresentation,
+  deriveRetryAction,
   deriveUnresolvedTurnProjection,
   HTML,
   JAVASCRIPT,
+  projectRemovalDetail,
   shouldActivateAfterAvailabilityRefresh,
   transitionProjectRemoval,
 } from "../src/ui.ts";
@@ -19,6 +21,7 @@ Deno.test("saved-project sidebar exposes the complete empty, unavailable, select
       "project-unavailable",
       "workspace-remove",
       "remove-dialog",
+      "remove-detail",
       "remove-cancel",
       "remove-confirm",
     ]
@@ -27,14 +30,6 @@ Deno.test("saved-project sidebar exposes the complete empty, unavailable, select
   }
   assert.match(HTML, /Add your first local Git repository/);
   assert.match(HTML, /one durable native Codex conversation/i);
-  assert.match(
-    HTML,
-    /Re-adding this path later creates a fresh Vantage project/i,
-  );
-  assert.match(
-    HTML,
-    /repository and Codex-owned native history remain untouched/i,
-  );
   assert.match(HTML, /Remove from Vantage/);
   assert.match(CSS, /\.app-shell \{[\s\S]*grid-template-columns: 300px/);
   assert.match(CSS, /\.project-item\.selected/);
@@ -54,6 +49,7 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
     /nativeBindings\.selectProject\(projectId, confirmed\)/,
   );
   assert.match(JAVASCRIPT, /nativeBindings\.removeProject\(projectId, true\)/);
+  assert.match(JAVASCRIPT, /removeDetail\.textContent = projectRemovalDetail/);
   assert.match(JAVASCRIPT, /typeof removeDialog\.showModal === "function"/);
   assert.match(
     JAVASCRIPT,
@@ -61,6 +57,34 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
   );
   assert.equal(JAVASCRIPT.includes("innerHTML"), false);
   assert.equal(JAVASCRIPT.includes("outerHTML"), false);
+});
+
+Deno.test("startup recovery retries initialization and removal copy matches process ownership", () => {
+  assert.equal(deriveRetryAction(false, null), "initialize");
+  assert.equal(deriveRetryAction(false, "available"), "initialize");
+  assert.equal(deriveRetryAction(true, "available"), "activate");
+  assert.equal(deriveRetryAction(true, "missing"), "refresh");
+  assert.match(JAVASCRIPT, /if \(action === "initialize"\)/);
+  assert.match(JAVASCRIPT, /appInitialized = true/);
+
+  const selected = projectRemovalDetail(true);
+  assert.match(selected, /stop this project's selected app-server process/i);
+  assert.match(
+    selected,
+    /repository and Codex-owned native history remain untouched/i,
+  );
+  assert.match(
+    selected,
+    /Re-adding this path later creates a fresh Vantage project/i,
+  );
+
+  const nonSelected = projectRemovalDetail(false);
+  assert.match(
+    nonSelected,
+    /keep the selected project's app-server and conversation running/i,
+  );
+  assert.doesNotMatch(nonSelected, /stop this project's selected app-server/i);
+  assert.match(nonSelected, /forgetting only this project's Vantage-owned/i);
 });
 
 Deno.test("read-only and idle composer states do not expose a meaningless Stop action", () => {

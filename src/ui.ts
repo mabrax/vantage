@@ -75,6 +75,24 @@ export interface UnresolvedTurnProjection {
   readonly terminalText: string;
 }
 
+export type RetryAction = "initialize" | "activate" | "refresh";
+
+export function deriveRetryAction(
+  appInitialized: boolean,
+  selectedAvailability: string | null,
+): RetryAction {
+  if (!appInitialized) return "initialize";
+  return selectedAvailability === "available" ? "activate" : "refresh";
+}
+
+export function projectRemovalDetail(removesSelectedProject: boolean): string {
+  const processDetail = removesSelectedProject
+    ? "Vantage will stop this project's selected app-server process before forgetting its Vantage-owned registration and conversation metadata."
+    : "Vantage will keep the selected project's app-server and conversation running while forgetting only this project's Vantage-owned registration and conversation metadata.";
+  return processDetail +
+    " The repository and Codex-owned native history remain untouched. Re-adding this path later creates a fresh Vantage project without restoring its removed Vantage conversation.";
+}
+
 export function deriveUnresolvedTurnProjection(
   recoveryLabel: string,
 ): UnresolvedTurnProjection {
@@ -311,7 +329,7 @@ export const HTML = `<!doctype html>
           <p class="eyebrow">Confirm removal</p>
           <h2 id="remove-title">Forget this project from Vantage?</h2>
           <p id="remove-project-name" class="remove-project-name"></p>
-          <p>Vantage will stop its selected app-server process and forget only Vantage-owned registration and conversation metadata. The repository and Codex-owned native history remain untouched. Re-adding this path later creates a fresh Vantage project without restoring its removed Vantage conversation.</p>
+          <p id="remove-detail"></p>
         </div>
         <div class="dialog-actions">
           <button id="remove-cancel" class="secondary" value="cancel" type="button">Cancel</button>
@@ -882,7 +900,9 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   "use strict";
 
   const deriveConversationPresentation = (${deriveConversationPresentation.toString()});
+  const deriveRetryAction = (${deriveRetryAction.toString()});
   const deriveUnresolvedTurnProjection = (${deriveUnresolvedTurnProjection.toString()});
+  const projectRemovalDetail = (${projectRemovalDetail.toString()});
   const shouldActivateAfterAvailabilityRefresh = (${shouldActivateAfterAvailabilityRefresh.toString()});
   const transitionProjectRemoval = (${transitionProjectRemoval.toString()});
   const nativeBindings = globalThis.bindings;
@@ -912,6 +932,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   const retry = document.querySelector("#retry");
   const removeDialog = document.querySelector("#remove-dialog");
   const removeProjectName = document.querySelector("#remove-project-name");
+  const removeDetail = document.querySelector("#remove-detail");
   const removeCancel = document.querySelector("#remove-cancel");
   const removeConfirm = document.querySelector("#remove-confirm");
   const switchDialog = document.querySelector("#switch-dialog");
@@ -927,6 +948,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   let removalProjectId = null;
   let pendingSwitchProjectId = null;
   let readyRepository = null;
+  let appInitialized = false;
 
   const setStatus = (kind, title, detail, canRetry = false) => {
     status.className = "status " + kind;
@@ -973,6 +995,9 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     if (registryBusy) return;
     removalProjectId = project.id;
     removeProjectName.textContent = project.canonicalRoot;
+    removeDetail.textContent = projectRemovalDetail(
+      project.id === registry.selectedProjectId,
+    );
     if (typeof removeDialog.showModal === "function") {
       removeDialog.showModal();
     } else {
@@ -1456,7 +1481,13 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
 
   retry.addEventListener("click", () => {
     const selected = selectedProject();
-    if (selected && selected.availability === "available") {
+    const action = deriveRetryAction(
+      appInitialized,
+      selected ? selected.availability : null,
+    );
+    if (action === "initialize") {
+      void initialize();
+    } else if (action === "activate") {
       void activateCurrent();
     } else {
       void refreshRegistry();
@@ -1474,6 +1505,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         );
         return;
       }
+      appInitialized = true;
       applyRegistry(result.snapshot);
       const selected = selectedProject();
       if (

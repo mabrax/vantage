@@ -322,6 +322,123 @@ Deno.test("unsupported and corrupt storage fail actionably without changing byte
   });
 });
 
+Deno.test("an incompatible migration rolls back without replacing durable bytes", async () => {
+  await withDatabase(async (path) => {
+    const db = new DatabaseSync(path);
+    db.exec(`
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY NOT NULL,
+        canonical_root TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL CHECK(created_at >= 0)
+      ) STRICT;
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY NOT NULL,
+        project_id TEXT NOT NULL UNIQUE
+          REFERENCES projects(id) ON DELETE CASCADE,
+        native_thread_id TEXT UNIQUE,
+        native_resume_state TEXT NOT NULL DEFAULT 'unstarted',
+        native_resume_failure TEXT,
+        created_at INTEGER NOT NULL CHECK(created_at >= 0)
+      ) STRICT;
+      CREATE TABLE preferences (
+        key TEXT PRIMARY KEY NOT NULL,
+        value_json TEXT NOT NULL CHECK(json_valid(value_json)),
+        updated_at INTEGER NOT NULL CHECK(updated_at >= 0)
+      ) STRICT;
+      CREATE TABLE turns (incompatible TEXT) STRICT;
+      INSERT INTO projects VALUES ('project-preserved', '/repo/preserved', 1);
+      INSERT INTO conversations
+        (id, project_id, native_resume_state, created_at)
+        VALUES ('conversation-preserved', 'project-preserved', 'unstarted', 1);
+      PRAGMA user_version = 1;
+    `);
+    db.close();
+
+    await assert.rejects(
+      () => PersistenceOwner.open(path),
+      (error) =>
+        error instanceof StorageError &&
+        error.code === "storage_open" &&
+        /preserve/i.test(error.action),
+    );
+
+    const preserved = new DatabaseSync(path, { readOnly: true });
+    const version = preserved.prepare("PRAGMA user_version").get() as {
+      user_version: number;
+    };
+    assert.equal(version.user_version, 1);
+    assert.equal(
+      preserved.prepare(
+        "SELECT canonical_root FROM projects WHERE id = ?",
+      ).get("project-preserved")?.canonical_root,
+      "/repo/preserved",
+    );
+    assert.equal(
+      preserved.prepare(
+        "SELECT name FROM sqlite_schema WHERE name = 'assistant_deltas'",
+      ).get(),
+      undefined,
+    );
+    assert.equal(
+      preserved.prepare("PRAGMA quick_check").get()?.quick_check,
+      "ok",
+    );
+    preserved.close();
+  });
+});
+
+Deno.test("a crashed uncommitted SQLite writer leaves no half-created registration", async () => {
+  await withDatabase(async (path) => {
+    const owner = await PersistenceOwner.open(path);
+    await owner.close();
+
+    const crashedWriter = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "eval",
+        `
+          const { DatabaseSync } = await import("node:sqlite");
+          const db = new DatabaseSync(Deno.args[0]);
+          db.exec(\`
+            PRAGMA foreign_keys = ON;
+            BEGIN IMMEDIATE;
+            INSERT INTO projects VALUES ('project-crash', '/repo/crash', 1);
+            INSERT INTO conversations
+              (id, project_id, native_resume_state, created_at)
+              VALUES ('conversation-crash', 'project-crash', 'unstarted', 1);
+          \`);
+          Deno.exit(86);
+        `,
+        path,
+      ],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    assert.equal(crashedWriter.code, 86);
+
+    const reopened = await PersistenceOwner.open(path);
+    assert.equal(
+      await reopened.readConversation({
+        projectId: "project-crash",
+        conversationId: "conversation-crash",
+      }),
+      null,
+    );
+    assert.deepEqual(await reopened.readProjectRegistry(), {
+      projects: [],
+      selectedProjectId: null,
+    });
+    await reopened.close();
+
+    const checked = new DatabaseSync(path, { readOnly: true });
+    assert.equal(
+      checked.prepare("PRAGMA quick_check").get()?.quick_check,
+      "ok",
+    );
+    checked.close();
+  });
+});
+
 Deno.test("one serialized owner controls each database connection", async () => {
   await withDatabase(async (path) => {
     const owner = await PersistenceOwner.open(path);
