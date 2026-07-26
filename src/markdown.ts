@@ -348,7 +348,10 @@ function beginsBlock(lines: SourceLine[], index: number): boolean {
     tableAlignments(lines[index + 1].text) !== null;
 }
 
-export function parseMarkdown(source: string): BlockNode[] {
+export function parseMarkdown(
+  source: string,
+  blockquoteDepth = 0,
+): BlockNode[] {
   const lines = sourceLines(source);
   const blocks: BlockNode[] = [];
   let index = 0;
@@ -406,13 +409,24 @@ export function parseMarkdown(source: string): BlockNode[] {
 
     if (/^ {0,3}>/.test(line)) {
       const quoted: string[] = [];
+      if (blockquoteDepth >= 32) {
+        while (index < lines.length && /^ {0,3}>/.test(lines[index].text)) {
+          quoted.push(lines[index].text);
+          index++;
+        }
+        blocks.push({
+          type: "paragraph",
+          children: parseInline(quoted.join("\n")),
+        });
+        continue;
+      }
       while (index < lines.length && /^ {0,3}>/.test(lines[index].text)) {
         quoted.push(lines[index].text.replace(/^ {0,3}>\s?/, ""));
         index++;
       }
       blocks.push({
         type: "blockquote",
-        children: parseMarkdown(quoted.join("\n")),
+        children: parseMarkdown(quoted.join("\n"), blockquoteDepth + 1),
       });
       continue;
     }
@@ -648,10 +662,18 @@ function markdownRuntime(): void {
   browser.vantageRenderMarkdown = (
     root: any,
     source: string,
-  ): void => {
-    const fragment = document.createDocumentFragment();
-    for (const node of parseMarkdown(source)) block(fragment, node);
-    root.replaceChildren(fragment);
+  ): boolean => {
+    try {
+      const fragment = document.createDocumentFragment();
+      for (const node of parseMarkdown(source)) block(fragment, node);
+      root.classList.remove("render-fallback");
+      root.replaceChildren(fragment);
+      return true;
+    } catch {
+      root.classList.add("render-fallback");
+      root.textContent = source;
+      return false;
+    }
   };
 }
 

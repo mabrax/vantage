@@ -128,9 +128,22 @@ closing structure is available. A table becomes a table only when its delimiter 
 An incomplete fence remains a readable code block. Invalid input produces text or a conservative
 partial structure; it cannot erase another message or mutate transcript state.
 
+Blockquote recursion stops after 32 presentation levels. Any remaining quote markers render as
+literal readable text within the bounded quote tree. This deterministic budget prevents adversarial
+nesting from consuming the JavaScript call stack without truncating or changing the raw response
+source.
+
+Parsing and rendering are failure-isolated per assistant response. The rich renderer builds a
+detached fragment and replaces the current response only after successful completion. If parsing,
+DOM construction, or replacement throws, that response body receives the complete ordered raw
+source through `textContent` and a pre-wrapped fallback style. Later deltas retry from the unchanged
+complete raw source; no failure can reach, erase, or reorder another transcript entry.
+
 Rendering is synchronous and side-effect-free except for replacing the current assistant body's
 children. A renderer defect therefore does not authorize a native retry or change a terminal
-outcome. Terminal labels are still shown only from native `turn_terminal` events.
+outcome. Terminal projection applies its native label in a `finally` boundary, after attempting the
+rich snapshot or raw fallback, so rendering failure cannot suppress completion, interruption, or
+failure truth. Terminal labels are still shown only from native `turn_terminal` events.
 
 ## Validation contract
 
@@ -139,6 +152,8 @@ Focused automated checks cover:
 - every supported block and inline family;
 - reparsing prefixes split inside emphasis, links, tables, inline code, and code fences;
 - incomplete and malformed input;
+- deeply nested blockquotes and synthetic parser/renderer failure;
+- raw-source fallback scoped to one response and terminal-label ordering under renderer failure;
 - exact fenced payload preservation for copying;
 - raw HTML, event attributes, resource syntax, and unsafe link schemes;
 - absence of HTML-injection and active URL sinks in the packaged renderer; and

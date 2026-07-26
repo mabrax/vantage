@@ -236,6 +236,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .message-role { margin-bottom: 6px; color: #788894; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 .message-body { min-width: 0; margin: 0; color: #dfe6ec; line-height: 1.62; overflow-wrap: anywhere; }
 .message.user .message-body { white-space: pre-wrap; }
+.message.assistant .message-body.render-fallback { white-space: pre-wrap; }
 .message-body > :first-child { margin-top: 0; }
 .message-body > :last-child { margin-bottom: 0; }
 .message-body p, .message-body ul, .message-body ol, .message-body blockquote,
@@ -459,16 +460,28 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     return { body, terminal, source: text };
   };
 
+  const renderAssistant = (assistant) => {
+    try {
+      globalThis.vantageRenderMarkdown(assistant.body, assistant.source);
+    } catch {
+      assistant.body.classList.add("render-fallback");
+      assistant.body.textContent = assistant.source;
+    }
+  };
+
   const setTurnTerminal = (event) => {
     if (!activeAssistant) return;
-    globalThis.vantageRenderMarkdown(activeAssistant.body, activeAssistant.source);
-    activeAssistant.terminal.hidden = false;
-    activeAssistant.terminal.className = "message-terminal " + event.status;
-    activeAssistant.terminal.textContent = event.status === "completed"
-      ? "Completed"
-      : event.status === "interrupted"
-      ? "Interrupted"
-      : "Failed";
+    try {
+      renderAssistant(activeAssistant);
+    } finally {
+      activeAssistant.terminal.hidden = false;
+      activeAssistant.terminal.className = "message-terminal " + event.status;
+      activeAssistant.terminal.textContent = event.status === "completed"
+        ? "Completed"
+        : event.status === "interrupted"
+        ? "Interrupted"
+        : "Failed";
+    }
   };
 
   const nativeErrorText = (error) => {
@@ -514,7 +527,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
       case "assistant_delta":
         if (activeAssistant && typeof event.delta === "string") {
           activeAssistant.source += event.delta;
-          globalThis.vantageRenderMarkdown(activeAssistant.body, activeAssistant.source);
+          renderAssistant(activeAssistant);
           activeAssistant.body.scrollIntoView({ block: "nearest" });
         }
         break;

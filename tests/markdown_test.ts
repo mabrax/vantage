@@ -147,6 +147,26 @@ Deno.test("incomplete and malformed constructs remain literal or readable", () =
   assert.equal(code.value, "alert(1)");
 });
 
+Deno.test("deep blockquotes stop at a deterministic readable nesting budget", () => {
+  const source = ">".repeat(10_000) + " x";
+  let blocks = parseMarkdown(source);
+  let depth = 0;
+  while (blocks[0]?.type === "blockquote") {
+    depth++;
+    blocks = [...blocks[0].children];
+  }
+
+  assert.equal(depth, 32);
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].type, "paragraph");
+  const fallbackText = blocks[0].type === "paragraph"
+    ? blocks[0].children.map((node) => node.type === "text" ? node.value : "")
+      .join("")
+    : "";
+  assert.equal(fallbackText.endsWith(" x"), true);
+  assert.equal(fallbackText.startsWith(">".repeat(9_968)), true);
+});
+
 Deno.test("HTML, event attributes, images, and unsafe links never become active nodes", () => {
   const source =
     '<script src="https://attacker.invalid/x.js">alert(1)</script> ' +
@@ -213,6 +233,88 @@ Deno.test("browser renderer bundle is valid JavaScript", () => {
   }]);
 });
 
+Deno.test("renderer failures replace only the affected body with raw text", () => {
+  const runtime = globalThis as unknown as {
+    document?: unknown;
+    vantageRenderMarkdown?: (
+      root: FakeElement,
+      source: string,
+    ) => boolean;
+  };
+  const previousDocument = runtime.document;
+  const previousRenderer = runtime.vantageRenderMarkdown;
+  const root = new FakeElement();
+  const source = ">".repeat(10_000) + " raw";
+
+  try {
+    runtime.document = {
+      createDocumentFragment() {
+        throw new Error("synthetic DOM failure");
+      },
+    };
+    new Function(MARKDOWN_JAVASCRIPT)();
+
+    assert.equal(runtime.vantageRenderMarkdown?.(root, source), false);
+    assert.equal(root.textContent, source);
+    assert.equal(root.classList.contains("render-fallback"), true);
+  } finally {
+    runtime.document = previousDocument;
+    runtime.vantageRenderMarkdown = previousRenderer;
+  }
+});
+
+Deno.test("unexpected rendering errors preserve raw deltas and cannot suppress terminal truth", () => {
+  const runtime = globalThis as unknown as {
+    document?: unknown;
+    vantageReceiveEvent?: (event: Record<string, unknown>) => void;
+    vantageRenderMarkdown?: () => boolean;
+  };
+  const previousDocument = runtime.document;
+  const previousReceive = runtime.vantageReceiveEvent;
+  const previousRenderer = runtime.vantageRenderMarkdown;
+  const document = new FakeDocument();
+
+  try {
+    runtime.document = document;
+    new Function(JAVASCRIPT)();
+    runtime.vantageRenderMarkdown = () => {
+      throw new Error("synthetic renderer failure");
+    };
+
+    runtime.vantageReceiveEvent?.({
+      type: "turn_pending",
+      prompt: "literal **user** prompt",
+    });
+    const raw = ">".repeat(10_000) + " assistant";
+    runtime.vantageReceiveEvent?.({ type: "assistant_delta", delta: raw });
+    runtime.vantageReceiveEvent?.({
+      type: "turn_terminal",
+      status: "completed",
+      canContinue: true,
+    });
+
+    const transcript = document.querySelector("#transcript");
+    assert.equal(transcript.children.length, 2);
+    assert.equal(
+      transcript.children[0].children[1].textContent,
+      "literal **user** prompt",
+    );
+    const assistant = transcript.children[1];
+    assert.equal(assistant.children[1].textContent, raw);
+    assert.equal(
+      assistant.children[1].classList.contains("render-fallback"),
+      true,
+    );
+    assert.equal(assistant.children[2].hidden, false);
+    assert.equal(assistant.children[2].className, "message-terminal completed");
+    assert.equal(assistant.children[2].textContent, "Completed");
+  } finally {
+    runtime.document = previousDocument;
+    runtime.vantageReceiveEvent = previousReceive;
+    runtime.vantageRenderMarkdown = previousRenderer;
+  }
+});
+
 Deno.test("packaged transcript keeps literal prompts, raw assistant source, CSP, and width containment", () => {
   assert.match(
     HTML,
@@ -228,7 +330,11 @@ Deno.test("packaged transcript keeps literal prompts, raw assistant source, CSP,
   );
   assert.match(
     JAVASCRIPT,
-    /vantageRenderMarkdown\(activeAssistant\.body, activeAssistant\.source\)/,
+    /renderAssistant\(activeAssistant\)/,
+  );
+  assert.match(
+    JAVASCRIPT,
+    /try \{\s+renderAssistant\(activeAssistant\);\s+\} finally \{/,
   );
   assert.match(
     CSS,
@@ -238,4 +344,86 @@ Deno.test("packaged transcript keeps literal prompts, raw assistant source, CSP,
     CSS,
     /\.code-block pre \{[\s\S]*overflow-x: auto;/,
   );
+  assert.match(
+    CSS,
+    /\.message\.assistant \.message-body\.render-fallback \{ white-space: pre-wrap; \}/,
+  );
 });
+
+class FakeClassList {
+  readonly values = new Set<string>();
+
+  add(...values: string[]): void {
+    for (const value of values) this.values.add(value);
+  }
+
+  remove(...values: string[]): void {
+    for (const value of values) this.values.delete(value);
+  }
+
+  contains(value: string): boolean {
+    return this.values.has(value);
+  }
+}
+
+class FakeElement {
+  readonly children: FakeElement[] = [];
+  readonly classList = new FakeClassList();
+  readonly dataset: Record<string, string> = {};
+  className = "";
+  textContent = "";
+  hidden = false;
+  disabled = false;
+  value = "";
+  readOnly = false;
+  type = "";
+  title = "";
+  start = 1;
+
+  append(...children: FakeElement[]): void {
+    this.children.push(...children);
+  }
+
+  replaceChildren(...children: FakeElement[]): void {
+    this.children.splice(0, this.children.length, ...children);
+  }
+
+  addEventListener(): void {}
+  focus(): void {}
+  scrollIntoView(): void {}
+  select(): void {}
+  remove(): void {}
+  setAttribute(): void {}
+}
+
+class FakeDocument {
+  readonly body = new FakeElement();
+  readonly elements = new Map<string, FakeElement>();
+
+  querySelector(selector: string): FakeElement {
+    let element = this.elements.get(selector);
+    if (!element) {
+      element = new FakeElement();
+      this.elements.set(selector, element);
+    }
+    return element;
+  }
+
+  createElement(): FakeElement {
+    return new FakeElement();
+  }
+
+  createTextNode(value: string): FakeElement {
+    const node = new FakeElement();
+    node.textContent = value;
+    return node;
+  }
+
+  createDocumentFragment(): FakeElement {
+    return new FakeElement();
+  }
+
+  execCommand(): boolean {
+    return true;
+  }
+}
