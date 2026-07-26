@@ -64,7 +64,7 @@ feature allocation; any defect repair it requires still counts against the five-
 
 ## After this milestone
 
-The next product conversation asks whether real use of this session-only chat justifies a durable
-project and thread-resume vertical. Persistence, sidebars, model controls, blocking interactions,
-rich activity, other workspace surfaces, and provider abstraction remain unscheduled; nothing in
-this milestone implements them.
+Milestone 2 turns the proven plain-text transcript into a safe rich-response surface for Markdown,
+code, Mermaid, and SVG. Persistence, sidebars, model controls, blocking interactions, rich tool
+activity, other workspace surfaces, and provider abstraction remain unscheduled; nothing in this
+milestone implements them.
