@@ -193,7 +193,10 @@ export function decodeXmlText(value: string): string | null {
         : Number.parseInt(entity.slice(1), 10);
       if (
         !Number.isInteger(numeric) || numeric <= 0 ||
-        numeric > 0x10ffff || (numeric >= 0xd800 && numeric <= 0xdfff)
+        numeric > 0x10ffff || (numeric >= 0xd800 && numeric <= 0xdfff) ||
+        (numeric <= 0x1f && numeric !== 0x09 && numeric !== 0x0a &&
+          numeric !== 0x0d) ||
+        numeric === 0x7f
       ) {
         valid = false;
         return "";
