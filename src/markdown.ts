@@ -5,7 +5,10 @@ import {
   findXmlTagEnd,
   MERMAID_SOURCE_LIMIT,
   mermaidNodeToken,
+  mermaidPlainLabel,
   parseMermaid,
+  parseMermaidFlowchart,
+  parseMermaidSequence,
   parseXmlAttributes,
   safeSvgAlternative,
   safeSvgColor,
@@ -667,6 +670,128 @@ function markdownRuntime(): void {
     svg.setAttribute("role", "img");
     svg.setAttribute("aria-label", diagram.alternative);
 
+    const appendTextLines = (
+      text: any,
+      value: string,
+      x: number,
+      centerY: number,
+    ) => {
+      const lines = value.split("\n").slice(0, 3);
+      lines.forEach((line: string, index: number) => {
+        const tspan = svgElement("tspan");
+        tspan.setAttribute("x", String(x));
+        tspan.setAttribute(
+          "y",
+          String(centerY + (index - (lines.length - 1) / 2) * 15 + 5),
+        );
+        tspan.textContent = line.length > 32 ? line.slice(0, 31) + "…" : line;
+        text.append(tspan);
+      });
+    };
+
+    if (diagram.kind === "sequence") {
+      const laneWidth = 210;
+      const padding = 34;
+      const headerHeight = 54;
+      const stepHeight = 54;
+      const width = padding * 2 +
+        Math.max(1, diagram.participants.length - 1) * laneWidth + 180;
+      const height = padding * 2 + headerHeight +
+        diagram.steps.length * stepHeight;
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      const lanes = new Map();
+      diagram.participants.forEach((participant: any, index: number) => {
+        const x = padding + 90 + index * laneWidth;
+        lanes.set(participant.id, x);
+        const header = svgElement("rect");
+        header.classList.add("diagram-node");
+        header.setAttribute("x", String(x - 80));
+        header.setAttribute("y", String(padding));
+        header.setAttribute("width", "160");
+        header.setAttribute("height", String(headerHeight));
+        header.setAttribute("rx", participant.actor ? "24" : "5");
+        svg.append(header);
+        const name = svgElement("text");
+        name.classList.add("diagram-node-label");
+        name.setAttribute("x", String(x));
+        name.setAttribute("y", String(padding + headerHeight / 2 + 5));
+        name.setAttribute("text-anchor", "middle");
+        name.textContent = participant.label.length > 24
+          ? participant.label.slice(0, 23) + "…"
+          : participant.label;
+        svg.append(name);
+        const lifeline = svgElement("line");
+        lifeline.classList.add("diagram-lifeline");
+        lifeline.setAttribute("x1", String(x));
+        lifeline.setAttribute("y1", String(padding + headerHeight));
+        lifeline.setAttribute("x2", String(x));
+        lifeline.setAttribute("y2", String(height - padding));
+        svg.append(lifeline);
+      });
+
+      const blocks: { y: number; block: string; label: string }[] = [];
+      diagram.steps.forEach((step: any, index: number) => {
+        const y = padding + headerHeight + (index + 0.65) * stepHeight;
+        if (step.kind === "block_start") {
+          blocks.push({ y: y - stepHeight * 0.45, ...step });
+          return;
+        }
+        if (step.kind === "block_end") {
+          const block = blocks.pop();
+          if (!block) return;
+          const box = svgElement("rect");
+          box.classList.add("diagram-sequence-block");
+          box.setAttribute("x", String(padding / 2));
+          box.setAttribute("y", String(block.y));
+          box.setAttribute("width", String(width - padding));
+          box.setAttribute("height", String(y - block.y + stepHeight * 0.25));
+          svg.insertBefore(box, svg.firstChild);
+          const blockLabel = svgElement("text");
+          blockLabel.classList.add("diagram-edge-label");
+          blockLabel.setAttribute("x", String(padding));
+          blockLabel.setAttribute("y", String(block.y + 15));
+          blockLabel.textContent = `${block.block}: ${block.label}`;
+          svg.append(blockLabel);
+          return;
+        }
+        const x1 = lanes.get(step.from);
+        const x2 = lanes.get(step.to);
+        const direction = x2 >= x1 ? 1 : -1;
+        const message = svgElement("line");
+        message.classList.add(
+          step.dashed ? "diagram-message-dashed" : "diagram-edge",
+        );
+        message.setAttribute("x1", String(x1));
+        message.setAttribute("y1", String(y));
+        message.setAttribute("x2", String(x2 - direction * 10));
+        message.setAttribute("y2", String(y));
+        svg.append(message);
+        const arrow = svgElement("polygon");
+        arrow.classList.add("diagram-arrow");
+        arrow.setAttribute(
+          "points",
+          `${x2},${y} ${x2 - direction * 11},${y - 6} ${x2 - direction * 11},${
+            y + 6
+          }`,
+        );
+        svg.append(arrow);
+        const messageLabel = svgElement("text");
+        messageLabel.classList.add("diagram-edge-label");
+        messageLabel.setAttribute("x", String((x1 + x2) / 2));
+        messageLabel.setAttribute("y", String(y - 8));
+        messageLabel.setAttribute("text-anchor", "middle");
+        messageLabel.textContent = step.label.length > 42
+          ? step.label.slice(0, 41) + "…"
+          : step.label;
+        svg.append(messageLabel);
+      });
+      viewport.append(svg);
+      figure.append(caption, viewport);
+      appendExactSource(figure, node.value, "Mermaid", false);
+      parent.append(figure);
+      return null;
+    }
+
     const count = diagram.nodes.length;
     const columns = Math.min(
       diagram.direction === "LR" || diagram.direction === "RL" ? 4 : 3,
@@ -699,6 +824,33 @@ function markdownRuntime(): void {
       });
     });
 
+    for (const group of diagram.groups) {
+      const members = group.nodes.map((id: string) => positions.get(id)).filter(
+        Boolean,
+      );
+      if (members.length === 0) continue;
+      const minX = Math.min(...members.map((position: any) => position.x)) - 16;
+      const minY = Math.min(...members.map((position: any) => position.y)) - 25;
+      const maxX = Math.max(...members.map((position: any) => position.x)) +
+        nodeWidth + 16;
+      const maxY = Math.max(...members.map((position: any) => position.y)) +
+        nodeHeight + 16;
+      const groupBox = svgElement("rect");
+      groupBox.classList.add("diagram-group");
+      groupBox.setAttribute("x", String(minX));
+      groupBox.setAttribute("y", String(minY));
+      groupBox.setAttribute("width", String(maxX - minX));
+      groupBox.setAttribute("height", String(maxY - minY));
+      groupBox.setAttribute("rx", "8");
+      svg.append(groupBox);
+      const groupLabel = svgElement("text");
+      groupLabel.classList.add("diagram-group-label");
+      groupLabel.setAttribute("x", String(minX + 10));
+      groupLabel.setAttribute("y", String(minY + 17));
+      groupLabel.textContent = group.label;
+      svg.append(groupLabel);
+    }
+
     for (const edge of diagram.edges) {
       const from = positions.get(edge.from);
       const to = positions.get(edge.to);
@@ -721,21 +873,30 @@ function markdownRuntime(): void {
       line.setAttribute("x2", String(x2));
       line.setAttribute("y2", String(y2));
       svg.append(line);
-      if (edge.arrow) {
+      const appendArrow = (
+        tipX: number,
+        tipY: number,
+        ux: number,
+        uy: number,
+      ) => {
         const size = 9;
-        const ux = dx / length;
-        const uy = dy / length;
-        const baseX = x2 - ux * size;
-        const baseY = y2 - uy * size;
+        const baseX = tipX - ux * size;
+        const baseY = tipY - uy * size;
         const arrow = svgElement("polygon");
         arrow.classList.add("diagram-arrow");
         arrow.setAttribute(
           "points",
-          `${x2},${y2} ${baseX - uy * size * 0.55},${
+          `${tipX},${tipY} ${baseX - uy * size * 0.55},${
             baseY + ux * size * 0.55
           } ${baseX + uy * size * 0.55},${baseY - ux * size * 0.55}`,
         );
         svg.append(arrow);
+      };
+      if (edge.arrow === "forward" || edge.arrow === "both") {
+        appendArrow(x2, y2, dx / length, dy / length);
+      }
+      if (edge.arrow === "both") {
+        appendArrow(x1, y1, -dx / length, -dy / length);
       }
       if (edge.label) {
         const edgeLabel = svgElement("text");
@@ -769,7 +930,7 @@ function markdownRuntime(): void {
         shape.setAttribute("y", String(position.y));
         shape.setAttribute("width", String(nodeWidth));
         shape.setAttribute("height", String(nodeHeight));
-        if (item.shape === "rounded") {
+        if (item.shape === "rounded" || item.shape === "cylinder") {
           shape.setAttribute("rx", String(nodeHeight / 2));
         }
       }
@@ -780,9 +941,12 @@ function markdownRuntime(): void {
       text.setAttribute("x", String(position.x + nodeWidth / 2));
       text.setAttribute("y", String(position.y + nodeHeight / 2 + 5));
       text.setAttribute("text-anchor", "middle");
-      text.textContent = item.label.length > 28
-        ? item.label.slice(0, 27) + "…"
-        : item.label;
+      appendTextLines(
+        text,
+        item.label,
+        position.x + nodeWidth / 2,
+        position.y + nodeHeight / 2,
+      );
       svg.append(text);
     }
     viewport.append(svg);
@@ -948,6 +1112,9 @@ export const MARKDOWN_JAVASCRIPT =
   `const SVG_SOURCE_LIMIT = ${SVG_SOURCE_LIMIT};\n` +
   [
     mermaidNodeToken,
+    mermaidPlainLabel,
+    parseMermaidSequence,
+    parseMermaidFlowchart,
     parseMermaid,
     decodeXmlText,
     findXmlTagEnd,
