@@ -1,67 +1,81 @@
 # Architecture overview
 
-Status: **Accepted for the session-only conversation and Milestone 2
-rich-response extension**
+Status: **Accepted through the Milestone 3 saved-conversation foundation**
 
-This document owns the technical shape of the first implementation. The
-[milestone map](../milestones/01-codex-chat.md) owns the delivery boundary and
-sequencing; the [vertical-slice contract](vertical-slice.md) owns the user
-journey and behavior.
+This set owns Vantage's implementation contracts. Milestone maps own delivery
+scope and sequencing:
 
-The [rich response rendering contract](rich-response-rendering.md) extends the
-proven transcript with safe streamed Markdown plus bounded offline Mermaid and
-SVG presentation. It does not expand or replace the native session boundary
-described here.
+- [Milestone 1](../milestones/01-codex-chat.md) proved session-only native chat;
+- [Milestone 2](../milestones/02-rich-markdown.md) added safe rich-response
+  presentation; and
+- [Milestone 3](../milestones/03-saved-projects-and-conversations.md) promotes
+  saved projects and exact native conversation resume.
+
+The current UI remains session-only until issues #26 and #27 consume the
+accepted [saved-project/conversation contract](saved-conversations.md). Issue
+#25 supplies the native proof and durable storage foundation without adding
+their sidebar, switching, or relaunch surfaces.
 
 ## Architectural outcome
 
-Vantage is a Deno Desktop application with a WebView UI and a privileged Deno
-host. During one open app session, the host validates one local Git repository,
-launches one `codex app-server`, keeps one native Codex thread in memory, and
-forwards the minimum conversation state needed by the UI.
+Vantage is a Deno Desktop application with an unprivileged WebView presentation
+boundary and a privileged Deno host. The host validates local Git roots,
+launches and exactly reaps one owned `codex app-server`, enforces one active
+turn, and translates the small native protocol surface needed by the product.
 
-The implementation uses the user's existing Codex installation, authentication,
-and default model. Codex is fixed to read-only access for this milestone. The UI
-never launches processes, reads Codex credentials, or speaks the native
-app-server protocol directly.
+One serialized persistence worker owns Vantage's local SQLite connection. It is
+a sibling of the native session controller: session events become typed,
+project-scoped persistence operations, while database snapshots become
+validated host/UI projections. Neither side receives the other's authority.
+
+Codex remains the source of native thread and terminal truth. Git repositories
+remain the source of repository truth. Vantage owns only its project registry,
+native-ID mapping, literal prompt and ordered raw-source projection, and
+preferences.
 
 ## Current decisions
 
-| Area                   | Milestone 1 decision                                                          |
-| ---------------------- | ----------------------------------------------------------------------------- |
-| Desktop runtime        | Deno Desktop on the primary development platform                              |
-| UI boundary            | WebView presentation with validated host commands and local streamed events   |
-| Provider               | Codex through one local `codex app-server` process                            |
-| Repository             | One canonical, accessible Git repository selected by pasted or typed path     |
-| Conversation           | One native thread held only for the open app session                          |
-| Turns                  | Sequential text turns; one active turn at a time                              |
-| Model and profile      | Existing Codex defaults and authentication                                    |
-| Runtime policy         | Fixed read-only access; no approval or mutation flow                          |
-| Persistence            | None; app close intentionally discards the conversation                       |
-| Protocol surface       | Only requests and events exercised by the session-only conversation           |
-| Assistant presentation | One raw source projected into inert Markdown and bounded visual DOM snapshots |
+| Area | Accepted decision |
+| --- | --- |
+| Desktop runtime | Deno Desktop on the primary development platform |
+| UI boundary | WebView presentation with validated host commands, snapshots, and ordered events |
+| Provider | Codex through one local Vantage-owned `codex app-server` process |
+| Repository | Validated canonical Git root; unique persisted registration in Milestone 3 |
+| Conversation | One Vantage conversation per project, mapped to an exact durable native thread |
+| Live session | Disposable process/connection, distinct from durable conversation identity |
+| Turns | Sequential text turns; one unresolved/active turn at a time |
+| Runtime policy | Fixed `approvalPolicy: never` and read-only sandbox |
+| Persistence | Strict versioned SQLite schema through one serialized module worker |
+| Native resume | `thread/resume` by persisted ID; returned ID must match; no transcript imitation |
+| Assistant presentation | Ordered raw source re-rendered into inert Markdown and bounded visual DOM |
 
-The [decision log](decisions.md) records the scope reduction and preserves
-deferred design choices.
+The [decision log](decisions.md) records why these choices were made and which
+earlier deferrals they supersede.
 
 ## System context
 
 ```mermaid
 flowchart LR
     subgraph Desktop["Vantage desktop"]
-        UI["WebView conversation UI"]
+        UI["WebView UI"]
         HOST["Privileged Deno host"]
+        SESSION["Native session controller"]
+        STORE["Serialized persistence worker"]
+        DB[("Vantage SQLite")]
 
-        UI -->|"repository, prompt, stop"| HOST
-        HOST -->|"text and terminal state"| UI
+        UI -->|"validated commands"| HOST
+        HOST -->|"snapshots and ordered events"| UI
+        HOST <--> SESSION
+        HOST <--> STORE
+        STORE <--> DB
     end
 
     CODEX["codex app-server"]
-    REPO[("Selected Git repository")]
-    HOME[("Existing Codex authentication")]
+    REPO[("Canonical Git repository")]
+    HOME[("Existing Codex authentication/history")]
     SERVICE["OpenAI Codex service"]
 
-    HOST <--> CODEX
+    SESSION <--> CODEX
     CODEX <--> REPO
     CODEX <--> HOME
     CODEX <--> SERVICE
@@ -71,124 +85,127 @@ flowchart LR
 
 ### WebView UI
 
-The UI owns transient presentation state:
+The UI owns transient presentation:
 
-- repository-path input before the conversation begins;
-- the visible user and assistant transcript;
-- composer state;
-- running, completed, interrupted, failed, and retryable states; and
-- the stop control.
+- project navigation and composer input when their owning issues land;
+- visible literal prompts and safely rendered assistant source;
+- running, completed, interrupted, failed, unavailable, and non-resumable
+  states; and
+- explicit send, stop, switch, remove, retry, and confirmation gestures.
 
-Every value from the host or Codex is untrusted presentation input. The UI does
-not receive credentials, unrestricted environment values, raw process handles,
-or filesystem authority.
+Every host value is untrusted presentation input. The WebView never receives
+credentials, unrestricted environment values, SQL, database paths, raw process
+handles, native request IDs, filesystem authority, or direct app-server access.
 
-### Deno host
+### Privileged Deno host
 
-The host owns the privileged session:
+The host owns orchestration:
 
-- canonicalize the selected path and verify it is an accessible Git repository;
-- launch and initialize one local app-server process without shell
-  interpolation;
-- start one native thread in that repository with read-only policy;
-- serialize prompt and stop commands;
-- translate only required assistant text and terminal lifecycle events for the
-  UI; and
-- terminate the native process when the window closes.
+- canonicalize and validate repository roots before registration or launch;
+- keep at most one selected live native session;
+- scope every native event and storage operation to exact durable identities;
+- enforce active-turn switching, close, and cleanup policy;
+- pass only typed operations to persistence; and
+- pass only validated snapshots/events to the WebView.
 
-The host does not own a project registry, database, durable transcript, model
-catalog, approval system, general event bus, or provider adapter.
+The host does not parse SQL in the UI path, store Codex authentication, claim
+ownership of repository contents/native history, or create a provider-neutral
+framework.
+
+### Persistence owner
+
+One module worker owns `node:sqlite` and serializes all operations. It enforces
+strict schema constraints, foreign keys, project/conversation/turn scope,
+ordered deltas, transaction boundaries, migrations, and conservative
+reconciliation. A second owner for the same canonical database path is rejected.
+
+Exact schema, lifecycle, recovery, corruption, removal, and re-add semantics
+live in [saved projects and conversations](saved-conversations.md).
 
 ### Codex child process
 
-The app-server owns the native thread, turns, repository interaction, and
-communication with the Codex service. Its identity is used only for same-session
-follow-ups. Vantage makes no claim that the conversation can be recovered after
-app close.
+App-server owns native threads, turns, service interaction, and Codex history.
+Vantage launches it without shell interpolation, consumes validated JSONL
+responses/notifications, and terminates the exact process it owns. Durable
+threads are non-ephemeral and survive that process.
+
+The promoted protocol surface is documented in
+[Codex app-server integration](codex-app-server.md).
 
 ## Interaction flow
 
 ```mermaid
 sequenceDiagram
-    participant User
     participant UI as Vantage UI
     participant Host as Deno host
+    participant Store as Persistence owner
     participant Codex as codex app-server
 
-    User->>UI: Paste repository path
-    UI->>Host: Start session
-    Host->>Host: Validate Git repository
-    Host->>Codex: Launch, initialize, start thread
-    User->>UI: Send prompt
-    UI->>Host: Start turn
-    Host->>Codex: Start read-only turn
-    loop Assistant response
-        Codex-->>Host: Text or terminal event
-        Host-->>UI: Ordered visible update
+    UI->>Host: Select registered project
+    Host->>Store: Read validated project/conversation snapshot
+    Host->>Codex: Launch and start or resume exact native thread
+    Codex-->>Host: Same native thread ID
+    UI->>Host: Submit literal prompt
+    Host->>Store: Commit pending turn
+    Host->>Codex: Start fixed-policy turn
+    Codex-->>Host: Native acceptance
+    Host->>Store: Commit native turn ID
+    loop Ordered assistant source
+        Codex-->>Host: Delta
+        Host->>Store: Append exact next sequence
+        Host-->>UI: Scoped visible delta
     end
-    User->>UI: Send follow-up or stop
-    UI->>Host: Start or interrupt turn
-    Host->>Codex: Continue same thread
+    Codex-->>Host: Native terminal
+    Host->>Store: Commit terminal truth
+    Host-->>UI: Terminal event
 ```
 
-## State and lifecycle
+Issues #26 and #27 implement this integrated flow. Issue #25 proves and
+constrains it.
 
-All Milestone 1 state is in memory. One repository is fixed for the session
-after the native thread starts. A prompt cannot be submitted while native
-acceptance is unresolved or a turn is active. Completion, interruption, and
-failure are visible terminal states; none is inferred from partial assistant
-text.
+## Safety and reliability boundary
 
-Closing the app ends the session. The host closes or terminates the
-Vantage-owned app-server process and the next launch begins without claiming
-that the repository or conversation was saved.
-
-## Safety boundary
-
-- Canonicalize and validate the repository before it becomes the native working
-  directory.
-- Use a fixed read-only policy so the milestone never depends on approval or
-  file-mutation flows.
-- Launch native processes with argument arrays rather than shell-built command
-  strings.
-- Keep Codex authentication and sensitive environment values out of WebView
-  payloads and ordinary diagnostics.
-- Reject duplicate prompt submission while a turn is unresolved or active.
-- Render assistant Markdown through the fixed inert-DOM contract without
-  executing markup, navigating, or fetching provider resources; keep user
-  prompts literal.
-- Exercise idle and active window-close cleanup on the primary development
-  platform.
+- Canonicalize repository identity before persistence or native launch.
+- Fix native work to read-only and `approvalPolicy: never`.
+- Use process argument arrays, not shell-built command strings.
+- Keep authentication, tokens, environment snapshots, database authority, and
+  process handles out of storage and WebView payloads.
+- Reject duplicate prompt submission while acceptance or a turn is unresolved.
+- Persist raw source only, then reconstruct presentation through the inert-DOM
+  renderer and unchanged offline CSP.
+- Never replay uncertain prompts, infer terminal success, backfill an
+  incomplete stream speculatively, or attach a late event across projects.
+- Reap the prior owned process before activating another live project.
+- Preserve corrupt or incompatible database bytes and stop mutation
+  actionably.
 
 ## Validation boundary
 
-Validation is attached to the two product paths:
+Validation is attached to consumer-visible paths:
 
-- a focused deterministic check proves repository rejection, one-active-turn
-  enforcement, ordered assistant text, terminal state, interruption, and process
-  cleanup; and
-- a packaged authenticated demonstration proves one repository-grounded prompt
-  and a context-dependent follow-up on the primary development platform.
+- deterministic unit tests protect repository validation, one-active-turn
+  semantics, event order, interruption, safe rendering, storage transactions,
+  migrations, reconciliation, and cleanup;
+- the authenticated two-process proof protects exact native thread-ID and
+  context continuity under the fixed policy; and
+- packaged QA protects real WebView behavior, packaging, codesign, and exact
+  process cleanup.
 
-There is no standalone compatibility, stress, certification, or multi-platform
-test deliverable.
+Broad provider abstraction, synchronization, write-enabled work, approvals,
+multiple conversations, generalized event sourcing, compatibility
+certification, multi-platform claims, and repair tooling remain outside this
+architecture boundary.
 
-## Deferred design
+## Documents
 
-The broader [Codex integration](codex-app-server.md) and
-[reliability and validation](reliability.md) documents preserve possible future
-designs for saved projects and threads, model controls, approvals, rich
-activity, persistence, restart recovery, and operational hardening. They do not
-expand Milestone 1.
-
-The [rich response rendering contract](rich-response-rendering.md) owns the
-current Markdown, code-copy, bounded Mermaid/SVG, link, resource, and
-streaming-presentation decisions. Arbitrary HTML, remote media, widgets,
-navigation, file actions, and terminal integration remain deferred.
+- [Decision log](decisions.md)
+- [First vertical slice](vertical-slice.md)
+- [Codex app-server integration](codex-app-server.md)
+- [Saved projects and conversations](saved-conversations.md)
+- [Rich response rendering](rich-response-rendering.md)
+- [Reliability and validation](reliability.md)
 
 ## References
 
 - [Deno Desktop overview](https://docs.deno.com/runtime/desktop/)
-- [Deno Desktop bindings](https://docs.deno.com/runtime/desktop/bindings/)
-- [Deno Desktop HTTP serving](https://docs.deno.com/runtime/desktop/serving/)
 - [Codex app-server](https://developers.openai.com/codex/app-server)
