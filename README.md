@@ -2,8 +2,9 @@
 
 Vantage is a local, Codex-first desktop workspace for software development. Its
 current packaged vertical keeps a persistent, ordered sidebar of canonical local
-Git projects and remembers the selected workspace. The selected project can hold
-one read-only Codex conversation for the current open app session.
+Git projects and remembers the selected workspace. Each project owns one saved,
+read-only Codex conversation that continues only through its exact durable
+native thread.
 
 ## Run the current vertical
 
@@ -18,17 +19,17 @@ deno task dev
 ```
 
 Paste a Git repository path into the sidebar, add more projects, and switch
-among them while Codex is idle. Vantage canonicalizes each Git root, rejects
-aliases, remembers registration order and selection, and keeps unavailable saved
-paths visible for recovery or explicit removal. Project removal forgets only
-Vantage-owned metadata and leaves the repository and Codex-owned history
-untouched.
+among them. Vantage canonicalizes each Git root, rejects aliases, remembers
+registration order and selection, and keeps unavailable saved paths visible for
+recovery or explicit removal. Project removal forgets only Vantage-owned
+metadata and leaves the repository and Codex-owned history untouched.
 
-Follow-up prompts reuse the same native thread until the selected project
-changes or Vantage closes. Durable transcript projection, native thread resume,
-and conversation continuation remain owned by Milestone 3 issue #27. Vantage
-does not implement multiple conversations, queued turns, steering, model
-controls, approvals, rich activity, or write-enabled work.
+Literal prompts, ordered raw assistant source, and native terminal outcomes
+restore after project switches and app relaunch. Existing conversations resume
+only by their exact native thread ID; missing, incompatible, or failed native
+history remains explicit and read-only. Vantage does not implement multiple
+conversations, queued turns, steering, model controls, approvals, rich activity,
+or write-enabled work.
 
 Build the packaged application and run all repository checks with:
 

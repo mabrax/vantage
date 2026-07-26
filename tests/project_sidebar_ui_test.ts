@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { CSS, HTML, JAVASCRIPT, transitionProjectRemoval } from "../src/ui.ts";
+import {
+  CSS,
+  deriveConversationPresentation,
+  deriveUnresolvedTurnProjection,
+  HTML,
+  JAVASCRIPT,
+  shouldActivateAfterAvailabilityRefresh,
+  transitionProjectRemoval,
+} from "../src/ui.ts";
 
 Deno.test("saved-project sidebar exposes the complete empty, unavailable, selection, and removal surface", () => {
   for (
@@ -18,7 +26,7 @@ Deno.test("saved-project sidebar exposes the complete empty, unavailable, select
     assert.match(HTML, new RegExp(`id="${id}"`));
   }
   assert.match(HTML, /Add your first local Git repository/);
-  assert.match(HTML, /conversation history is not saved in this step/i);
+  assert.match(HTML, /one durable native Codex conversation/i);
   assert.match(
     HTML,
     /Re-adding this path later creates a fresh Vantage project/i,
@@ -41,7 +49,10 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
     JAVASCRIPT,
     /nativeBindings\.addProject\(repositoryInput\.value\)/,
   );
-  assert.match(JAVASCRIPT, /nativeBindings\.selectProject\(projectId\)/);
+  assert.match(
+    JAVASCRIPT,
+    /nativeBindings\.selectProject\(projectId, confirmed\)/,
+  );
   assert.match(JAVASCRIPT, /nativeBindings\.removeProject\(projectId, true\)/);
   assert.match(JAVASCRIPT, /typeof removeDialog\.showModal === "function"/);
   assert.match(
@@ -52,6 +63,179 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
   assert.equal(JAVASCRIPT.includes("outerHTML"), false);
 });
 
+Deno.test("read-only and idle composer states do not expose a meaningless Stop action", () => {
+  assert.match(
+    JAVASCRIPT,
+    /turnStop\.hidden = ready \|\| !turnActive/,
+  );
+  assert.match(
+    JAVASCRIPT,
+    /turnStop\.disabled = ready \|\| !turnActive/,
+  );
+});
+
+Deno.test("unavailable project presentation preserves rich saved history read-only until exact readiness", () => {
+  const richConversation = {
+    readOnly: false,
+    nativeResumeFailure: null,
+    nativeThreadId: "saved-native-id",
+    nativeResumeState: "resumable",
+    turns: [{
+      prompt: "literal **prompt**",
+      assistantSource:
+        '```mermaid\ngraph LR\n  Saved --> Restored\n```\n```svg\n<svg viewBox="0 0 1 1"></svg>\n```',
+      phase: "completed",
+      terminalLabel: "Completed",
+      recoveryLabel: null,
+    }],
+  };
+  const unavailable = deriveConversationPresentation(
+    {
+      canonicalRoot: "/exact/repository",
+      availability: "missing",
+      unavailableMessage: "The saved repository is missing or has moved.",
+      unavailableAction:
+        "Restore it at the exact saved path, or remove and re-add the project.",
+    },
+    richConversation,
+    null,
+    true,
+  );
+
+  assert.equal(unavailable.mode, "repository_unavailable");
+  assert.strictEqual(unavailable.savedConversation, richConversation);
+  assert.equal(unavailable.showUnavailable, true);
+  assert.equal(unavailable.showConversation, true);
+  assert.equal(unavailable.restoreTranscript, true);
+  assert.equal(unavailable.composerReady, false);
+  assert.equal(unavailable.canRetryNative, false);
+  assert.match(unavailable.statusTitle ?? "", /saved history is read-only/i);
+  assert.match(unavailable.statusDetail ?? "", /exact canonical root/i);
+  assert.equal(richConversation.nativeResumeState, "resumable");
+  assert.equal(richConversation.nativeThreadId, "saved-native-id");
+
+  const opening = deriveConversationPresentation(
+    {
+      canonicalRoot: "/exact/repository",
+      availability: "available",
+      unavailableMessage: null,
+      unavailableAction: null,
+    },
+    richConversation,
+    null,
+    false,
+  );
+  assert.equal(opening.mode, "opening");
+  assert.strictEqual(opening.savedConversation, richConversation);
+  assert.equal(opening.showConversation, true);
+  assert.equal(opening.composerReady, false);
+
+  const ready = deriveConversationPresentation(
+    {
+      canonicalRoot: "/exact/repository",
+      availability: "available",
+      unavailableMessage: null,
+      unavailableAction: null,
+    },
+    richConversation,
+    "/exact/repository",
+    false,
+  );
+  assert.equal(ready.mode, "ready");
+  assert.equal(ready.showConversation, true);
+  assert.equal(ready.composerReady, true);
+});
+
+Deno.test("unresolved recovery and native resume failure expose distinct actions", () => {
+  const project = {
+    canonicalRoot: "/exact/repository",
+    availability: "available",
+    unavailableMessage: null,
+    unavailableAction: null,
+  };
+  const unresolved = deriveConversationPresentation(
+    project,
+    {
+      readOnly: true,
+      nativeResumeFailure: null,
+      turns: [{ phase: "streaming", recoveryLabel: "Incomplete" }],
+    },
+    null,
+    false,
+  );
+  assert.equal(unresolved.mode, "recovered_unresolved");
+  assert.equal(unresolved.canRetryNative, false);
+  assert.match(unresolved.statusDetail ?? "", /no reconciliation retry/i);
+  assert.doesNotMatch(
+    unresolved.statusDetail ?? "",
+    /retry (the )?exact native/i,
+  );
+
+  const nativeFailure = deriveConversationPresentation(
+    project,
+    {
+      readOnly: true,
+      nativeResumeFailure: "missing",
+      turns: [{ phase: "completed", terminalLabel: "Completed" }],
+    },
+    null,
+    false,
+  );
+  assert.equal(nativeFailure.mode, "native_non_resumable");
+  assert.equal(nativeFailure.canRetryNative, true);
+  assert.match(nativeFailure.statusDetail ?? "", /exact saved native ID/i);
+  assert.match(
+    nativeFailure.statusDetail ?? "",
+    /will not start a replacement/i,
+  );
+});
+
+Deno.test("availability refresh activates only the same restored project identity", () => {
+  const unavailable = {
+    id: "project",
+    canonicalRoot: "/exact/repository",
+    availability: "missing",
+  };
+  assert.equal(
+    shouldActivateAfterAvailabilityRefresh(unavailable, {
+      ...unavailable,
+      availability: "available",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldActivateAfterAvailabilityRefresh(unavailable, {
+      id: "replacement",
+      canonicalRoot: "/exact/repository",
+      availability: "available",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldActivateAfterAvailabilityRefresh(unavailable, {
+      id: "project",
+      canonicalRoot: "/retargeted/repository",
+      availability: "available",
+    }),
+    false,
+  );
+});
+
+Deno.test("active recovered turn projects Unresolved without enabling continuation", () => {
+  const projection = deriveUnresolvedTurnProjection(
+    "Codex accepted this turn, but no terminal outcome was proven.",
+  );
+  assert.deepEqual(projection, {
+    turnActive: false,
+    composerReady: false,
+    terminalClass: "message-terminal unresolved",
+    terminalText:
+      "Unresolved · Codex accepted this turn, but no terminal outcome was proven.",
+  });
+  assert.doesNotMatch(projection.terminalText, /Failed/);
+  assert.match(CSS, /\.message-terminal\.unresolved/);
+});
+
 Deno.test("registry busy state guards and disables every competing project mutation without blocking active-turn removal", () => {
   assert.match(JAVASCRIPT, /let registryBusy = false/);
   assert.match(
@@ -60,7 +244,7 @@ Deno.test("registry busy state guards and disables every competing project mutat
   );
   assert.match(
     JAVASCRIPT,
-    /select\.disabled = registryBusy \|\| turnActive/,
+    /select\.disabled = registryBusy/,
   );
   assert.match(JAVASCRIPT, /remove\.disabled = registryBusy/);
   assert.match(JAVASCRIPT, /workspaceRemove\.disabled = busy/);

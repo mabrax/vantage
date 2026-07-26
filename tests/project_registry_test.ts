@@ -10,26 +10,41 @@ import {
 } from "../src/project_registry.ts";
 import { SessionController } from "../src/session_controller.ts";
 
+let nativeTurnSequence = 0;
+
 class FakeCodex implements CodexSession {
   readonly prompts: string[] = [];
+  readonly initializeRequests: Array<string | null> = [];
+  threadStarts = 0;
   shutdowns = 0;
   onTurnEvent: ((event: NativeTurnEvent) => void) | null = null;
   initializeGate: Promise<void> = Promise.resolve();
 
   constructor(readonly repository: string, readonly log: string[]) {}
 
-  async initialize(): Promise<void> {
+  async initialize(request?: { nativeThreadId?: string }) {
+    this.initializeRequests.push(request?.nativeThreadId ?? null);
     this.log.push(`initialize:${this.repository}`);
     await this.initializeGate;
+    return {
+      threadId: request?.nativeThreadId ?? null,
+      resumed: request?.nativeThreadId !== undefined,
+    };
+  }
+
+  startDurableThread(): Promise<string> {
+    this.threadStarts++;
+    this.log.push(`start-thread:${this.repository}`);
+    return Promise.resolve(`thread:${this.repository}`);
   }
 
   startTurn(
     prompt: string,
     onEvent: (event: NativeTurnEvent) => void,
-  ): Promise<void> {
+  ): Promise<string> {
     this.prompts.push(prompt);
     this.onTurnEvent = onEvent;
-    return Promise.resolve();
+    return Promise.resolve(`turn-${++nativeTurnSequence}`);
   }
 
   interruptTurn(): Promise<void> {
@@ -115,7 +130,7 @@ async function gitStatus(root: string): Promise<string> {
 async function waitFor(predicate: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt++) {
     if (predicate()) return;
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   assert.fail("Timed out waiting for the deferred registry operation.");
 }
@@ -208,6 +223,48 @@ Deno.test("unavailable registrations remain visible at their exact identity acro
   try {
     await harness.registry.addProject(root);
     const selectedClient = harness.clients[0];
+    await harness.persistence.setNativeThread({
+      projectId: "project-saved",
+      conversationId: "conversation-saved",
+      nativeThreadId: "saved-native-id",
+    });
+    await harness.persistence.beginTurn({
+      projectId: "project-saved",
+      conversationId: "conversation-saved",
+      turnId: "completed-rich-turn",
+      ordinal: 0,
+      prompt: "literal **saved prompt**",
+      createdAt: 110,
+    });
+    await harness.persistence.markTurnAccepted({
+      projectId: "project-saved",
+      conversationId: "conversation-saved",
+      turnId: "completed-rich-turn",
+      nativeTurnId: "native-turn",
+      acceptedAt: 111,
+    });
+    await harness.persistence.appendAssistantDelta({
+      projectId: "project-saved",
+      conversationId: "conversation-saved",
+      turnId: "completed-rich-turn",
+      sequence: 0,
+      delta: "```mermaid\ngraph LR\n  Saved --> Restored\n```\n",
+    });
+    await harness.persistence.appendAssistantDelta({
+      projectId: "project-saved",
+      conversationId: "conversation-saved",
+      turnId: "completed-rich-turn",
+      sequence: 1,
+      delta:
+        '```svg\n<svg viewBox="0 0 1 1"></svg>\n```\n<script>inert</script>',
+    });
+    await harness.persistence.finishTurn({
+      projectId: "project-saved",
+      conversationId: "conversation-saved",
+      turnId: "completed-rich-turn",
+      status: "completed",
+      terminalAt: 112,
+    });
     await Deno.rename(root, moved);
     let snapshot = await harness.registry.refreshProjects();
     assert.equal(snapshot.projects.length, 1);
@@ -219,6 +276,18 @@ Deno.test("unavailable registrations remain visible at their exact identity acro
     );
     assert.equal(selectedClient.shutdowns, 1);
     assert.equal(harness.session.snapshot().repository, null);
+    assert.equal(snapshot.conversation?.nativeThreadId, "saved-native-id");
+    assert.equal(snapshot.conversation?.nativeResumeState, "resumable");
+    assert.equal(snapshot.conversation?.nativeResumeFailure, null);
+    assert.equal(
+      snapshot.conversation?.turns[0].prompt,
+      "literal **saved prompt**",
+    );
+    assert.match(
+      snapshot.conversation?.turns[0].assistantSource ?? "",
+      /Saved --> Restored/,
+    );
+    assert.equal(snapshot.conversation?.turns[0].terminalLabel, "Completed");
     await harness.registry.close();
 
     harness = await createHarness(databasePath, []);
@@ -226,6 +295,9 @@ Deno.test("unavailable registrations remain visible at their exact identity acro
     assert.equal(snapshot.projects[0].canonicalRoot, root);
     assert.equal(snapshot.projects[0].availability, "missing");
     assert.equal(snapshot.selectedProjectId, "project-saved");
+    assert.equal(snapshot.conversation?.nativeThreadId, "saved-native-id");
+    assert.equal(snapshot.conversation?.nativeResumeState, "resumable");
+    assert.equal(snapshot.conversation?.turns[0].terminalLabel, "Completed");
     await harness.registry.activateSelectedProject();
     assert.equal(harness.clients.length, 0);
 
@@ -233,6 +305,36 @@ Deno.test("unavailable registrations remain visible at their exact identity acro
     snapshot = await harness.registry.refreshProjects();
     assert.equal(snapshot.projects[0].availability, "identity_changed");
     assert.equal(snapshot.projects[0].canonicalRoot, root);
+    assert.equal(snapshot.conversation?.nativeThreadId, "saved-native-id");
+    assert.equal(harness.clients.length, 0);
+
+    await Deno.remove(root);
+    await Deno.rename(moved, root);
+    snapshot = await harness.registry.refreshProjects();
+    assert.equal(snapshot.projects[0].availability, "available");
+    assert.equal(snapshot.conversation?.nativeThreadId, "saved-native-id");
+    assert.equal(snapshot.conversation?.turns[0].terminalLabel, "Completed");
+    assert.equal(harness.clients.length, 0);
+
+    snapshot = await harness.registry.activateSelectedProject();
+    assert.equal(harness.clients.length, 1);
+    assert.deepEqual(harness.clients[0].initializeRequests, [
+      "saved-native-id",
+    ]);
+    assert.equal(harness.clients[0].threadStarts, 0);
+    assert.equal(snapshot.conversation?.nativeThreadId, "saved-native-id");
+    assert.equal(snapshot.conversation?.nativeResumeState, "resumable");
+    assert.equal(snapshot.conversation?.nativeResumeFailure, null);
+    assert.equal(snapshot.conversation?.readOnly, false);
+    assert.equal(snapshot.conversation?.composerAvailable, true);
+    assert.equal(
+      snapshot.conversation?.turns[0].prompt,
+      "literal **saved prompt**",
+    );
+    assert.match(
+      snapshot.conversation?.turns[0].assistantSource ?? "",
+      /<script>inert<\/script>/,
+    );
   } finally {
     await harness.registry.close().catch(() => undefined);
     await Deno.remove(directory, { recursive: true });
@@ -290,7 +392,7 @@ Deno.test("removal requires confirmation, reaps only the selected process, and n
       status: "completed",
       canContinue: true,
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => harness.session.snapshot().phase === "completed");
     assert.deepEqual(
       harness.events.slice(-2),
       [
@@ -329,6 +431,7 @@ Deno.test("removal requires confirmation, reaps only the selected process, and n
     assert.deepEqual(harness.registry.snapshot(), {
       projects: [],
       selectedProjectId: null,
+      conversation: null,
     });
     assert.deepEqual(
       await Deno.readFile(`${first}/sentinel.txt`),
@@ -378,7 +481,7 @@ Deno.test("no-longer-Git roots are actionable and selection is blocked during an
     await harness.session.submitPrompt("active");
     await assert.rejects(
       () => harness.registry.selectProject("project-first"),
-      /only while Codex is idle/,
+      /still working in the current project/,
     );
     assert.equal(
       harness.registry.snapshot().selectedProjectId,

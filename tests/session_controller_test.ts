@@ -15,19 +15,28 @@ class FakeCodex implements CodexSession {
   interruptGate: Promise<void> = Promise.resolve();
   initializeError: unknown = null;
 
-  async initialize(): Promise<void> {
+  async initialize(request?: { nativeThreadId?: string }) {
     this.initialized++;
     await this.initializeGate;
     if (this.initializeError) throw this.initializeError;
+    return {
+      threadId: request?.nativeThreadId ?? null,
+      resumed: request?.nativeThreadId !== undefined,
+    };
+  }
+
+  startDurableThread(): Promise<string> {
+    return Promise.resolve("thread-test");
   }
 
   async startTurn(
     prompt: string,
     onEvent: (event: NativeTurnEvent) => void,
-  ): Promise<void> {
+  ): Promise<string> {
     this.prompts.push(prompt);
     this.onTurnEvent = onEvent;
     await this.startGate;
+    return `turn-${this.prompts.length}`;
   }
 
   async interruptTurn(): Promise<void> {

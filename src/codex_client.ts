@@ -25,19 +25,31 @@ interface TurnStartedSignal {
 
 export interface NativeTurnEvent {
   readonly type: "accepted" | "delta" | "terminal";
+  readonly nativeTurnId?: string;
   readonly delta?: string;
   readonly status?: TurnTerminalStatus;
   readonly message?: string;
   readonly action?: string;
   readonly canContinue?: boolean;
+  readonly nativeTruth?: boolean;
+}
+
+export interface NativeSessionIdentity {
+  readonly threadId: string | null;
+  readonly resumed: boolean;
+}
+
+export interface NativeSessionRequest {
+  readonly nativeThreadId?: string;
 }
 
 export interface CodexSession {
-  initialize(): Promise<void>;
+  initialize(request?: NativeSessionRequest): Promise<NativeSessionIdentity>;
+  startDurableThread(): Promise<string>;
   startTurn(
     prompt: string,
     onEvent: (event: NativeTurnEvent) => void,
-  ): Promise<void>;
+  ): Promise<string>;
   interruptTurn(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -102,7 +114,9 @@ export class AppServerCodexSession implements CodexSession {
     void this.#watchExit();
   }
 
-  async initialize(): Promise<void> {
+  async initialize(
+    request: NativeSessionRequest = {},
+  ): Promise<NativeSessionIdentity> {
     try {
       await this.#request("initialize", {
         clientInfo: {
@@ -126,10 +140,79 @@ export class AppServerCodexSession implements CodexSession {
         );
       }
 
+      if (request.nativeThreadId === undefined) {
+        return { threadId: null, resumed: false };
+      }
+      const resumed = true;
+      const started = asObject(
+        await this.#request("thread/resume", {
+          threadId: request.nativeThreadId,
+          cwd: this.repository,
+          approvalPolicy: "never",
+          sandbox: "read-only",
+        }),
+      );
+      const thread = asObject(started.thread);
+      if (typeof thread.id !== "string" || thread.id.length === 0) {
+        throw new Error(
+          `${
+            resumed ? "thread/resume" : "thread/start"
+          } did not return a thread id`,
+        );
+      }
+      if (resumed && thread.id !== request.nativeThreadId) {
+        throw new VantageError(
+          "native_incompatible",
+          "Codex resumed a different native conversation.",
+          "Keep the saved transcript read-only and remove the project or retry the exact native resume.",
+        );
+      }
+      if (started.cwd !== undefined && started.cwd !== this.repository) {
+        if (resumed) {
+          throw new VantageError(
+            "native_incompatible",
+            "The saved native conversation belongs to an incompatible repository history.",
+            "Restore the original repository or remove the saved project.",
+          );
+        }
+        throw new Error(
+          "thread/start returned an unexpected working directory",
+        );
+      }
+      this.#threadId = thread.id;
+      return { threadId: thread.id, resumed };
+    } catch (error) {
+      if (error instanceof VantageError) throw error;
+      if (request.nativeThreadId !== undefined) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not found|missing|unknown thread/i.test(message)) {
+          throw new VantageError(
+            "native_missing",
+            "The saved native Codex conversation is missing.",
+            "Keep this transcript read-only, retry the exact native resume, or remove the project.",
+          );
+        }
+        throw new VantageError(
+          "native_resume_failed",
+          "Vantage could not resume the saved native Codex conversation.",
+          "Retry the exact native resume after checking Codex authentication and history.",
+        );
+      }
+      throw new VantageError(
+        "codex_start",
+        "Codex could not initialize a repository session.",
+        "Check your Codex installation and authentication, then retry.",
+      );
+    }
+  }
+
+  async startDurableThread(): Promise<string> {
+    if (this.#threadId !== null) return this.#threadId;
+    try {
       const started = asObject(
         await this.#request("thread/start", {
           cwd: this.repository,
-          ephemeral: true,
+          ephemeral: false,
           approvalPolicy: "never",
           sandbox: "read-only",
         }),
@@ -144,12 +227,12 @@ export class AppServerCodexSession implements CodexSession {
         );
       }
       this.#threadId = thread.id;
-    } catch (error) {
-      if (error instanceof VantageError) throw error;
+      return thread.id;
+    } catch {
       throw new VantageError(
         "codex_start",
-        "Codex could not initialize a repository session.",
-        "Check your Codex installation and authentication, then retry.",
+        "Codex could not create a durable conversation.",
+        "Check Codex and local storage, then retry without replaying the prompt.",
       );
     }
   }
@@ -157,7 +240,7 @@ export class AppServerCodexSession implements CodexSession {
   async startTurn(
     prompt: string,
     onEvent: (event: NativeTurnEvent) => void,
-  ): Promise<void> {
+  ): Promise<string> {
     if (this.#threadId === null) {
       throw new VantageError(
         "turn",
@@ -196,6 +279,7 @@ export class AppServerCodexSession implements CodexSession {
       }
       this.#activeTurnId = turn.id;
       this.#emitAccepted();
+      return turn.id;
     } catch (error) {
       this.#turnStartedSignal?.resolve();
       this.#turnStartedSignal = null;
@@ -439,6 +523,7 @@ export class AppServerCodexSession implements CodexSession {
           ? "Check Codex outside Vantage, then try another prompt."
           : undefined,
         canContinue: true,
+        nativeTruth: true,
       });
       this.#turnSink = null;
       this.#activeTurnId = null;
@@ -450,9 +535,12 @@ export class AppServerCodexSession implements CodexSession {
   }
 
   #emitAccepted(): void {
-    if (!this.#accepted && this.#turnSink) {
+    if (!this.#accepted && this.#turnSink && this.#activeTurnId) {
       this.#accepted = true;
-      this.#turnSink({ type: "accepted" });
+      this.#turnSink({
+        type: "accepted",
+        nativeTurnId: this.#activeTurnId,
+      });
     }
   }
 
@@ -468,6 +556,7 @@ export class AppServerCodexSession implements CodexSession {
         message: "Codex stopped before the turn completed.",
         action: "Check Codex outside Vantage, then retry the session.",
         canContinue: false,
+        nativeTruth: false,
       });
       this.#turnSink = null;
       this.#activeTurnId = null;

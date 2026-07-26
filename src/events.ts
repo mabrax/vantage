@@ -27,10 +27,16 @@ export type SessionEvent =
     readonly canContinue: boolean;
   }
   | {
+    readonly type: "turn_unresolved";
+    readonly recoveryLabel: string;
+    readonly action: string;
+  }
+  | {
     readonly type: "session_failed";
     readonly code: string;
     readonly message: string;
     readonly action: string;
+    readonly canRetry?: boolean;
   };
 
 export type EventSink = (event: SessionEvent) => void | Promise<void>;
