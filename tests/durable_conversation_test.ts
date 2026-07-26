@@ -397,6 +397,149 @@ Deno.test("native acceptance callback racing the turn/start response commits and
   }
 });
 
+Deno.test("uncertain durable turn/start failure projects Unresolved instead of a Failed terminal", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "vantage-uncertain-start-",
+  });
+  const persistence = await PersistenceOwner.open(
+    `${directory}/vantage.sqlite3`,
+  );
+  await persistence.createProjectWithConversation({
+    projectId: "project",
+    conversationId: "conversation",
+    canonicalRoot: "/repo",
+    createdAt: 1,
+  });
+  const events: SessionEvent[] = [];
+  const log: string[] = [];
+  const client = new DurableFakeCodex("/repo", log);
+  client.startTurn = (prompt, onEvent) => {
+    client.prompts.push(prompt);
+    client.onEvent = onEvent;
+    log.push("dispatch:/repo");
+    return Promise.reject(new Error("uncertain turn/start outcome"));
+  };
+  const session = new SessionController(
+    (event) => {
+      events.push(event);
+    },
+    () => client,
+    (value) => Promise.resolve(String(value)),
+  );
+  session.attachPersistence(persistence);
+
+  try {
+    await session.startSession(
+      "/repo",
+      "/repo",
+      scope("project", "conversation"),
+    );
+    const snapshot = await session.submitPrompt("uncertain prompt");
+    assert.equal(snapshot.phase, "failed");
+    assert.deepEqual(
+      events.slice(-2).map((event) => event.type),
+      ["turn_unresolved", "session_failed"],
+    );
+    const unresolved = events.at(-2);
+    assert.equal(
+      unresolved?.type === "turn_unresolved" &&
+        unresolved.recoveryLabel,
+      "Prompt acceptance is uncertain. It was not replayed.",
+    );
+    assert.equal(
+      events.some((event) =>
+        event.type === "turn_terminal" && event.status === "failed"
+      ),
+      false,
+    );
+    const sessionFailure = events.at(-1);
+    assert.equal(
+      sessionFailure?.type === "session_failed"
+        ? sessionFailure.canRetry
+        : null,
+      false,
+    );
+    const saved = await persistence.readConversation({
+      projectId: "project",
+      conversationId: "conversation",
+    });
+    assert.equal(saved?.turns[0].phase, "pending");
+    assert.equal(
+      saved?.turns[0].recoveryDisposition,
+      "uncertain_acceptance",
+    );
+    assert.equal(saved?.turns[0].terminalStatus, null);
+    assert.equal(log.filter((entry) => entry === "shutdown:/repo").length, 1);
+  } finally {
+    await session.close().catch(() => undefined);
+    await persistence.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("native failed terminal is durably committed and remains the only Failed projection", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "vantage-native-failed-",
+  });
+  const persistence = await PersistenceOwner.open(
+    `${directory}/vantage.sqlite3`,
+  );
+  await persistence.createProjectWithConversation({
+    projectId: "project",
+    conversationId: "conversation",
+    canonicalRoot: "/repo",
+    createdAt: 1,
+  });
+  const events: SessionEvent[] = [];
+  const client = new DurableFakeCodex("/repo");
+  const session = new SessionController(
+    (event) => {
+      events.push(event);
+    },
+    () => client,
+    (value) => Promise.resolve(String(value)),
+  );
+  session.attachPersistence(persistence);
+
+  try {
+    await session.startSession(
+      "/repo",
+      "/repo",
+      scope("project", "conversation"),
+    );
+    await session.submitPrompt("native failure");
+    client.emit({
+      type: "terminal",
+      status: "failed",
+      message: "Native model failure.",
+      canContinue: true,
+      nativeTruth: true,
+    });
+    await waitFor(() => session.snapshot().phase === "turn_failed");
+    const terminal = events.at(-1);
+    assert.equal(terminal?.type, "turn_terminal");
+    assert.equal(
+      terminal?.type === "turn_terminal" && terminal.status,
+      "failed",
+    );
+    assert.equal(
+      events.some((event) => event.type === "turn_unresolved"),
+      false,
+    );
+    const saved = await persistence.readConversation({
+      projectId: "project",
+      conversationId: "conversation",
+    });
+    assert.equal(saved?.turns[0].phase, "failed");
+    assert.equal(saved?.turns[0].terminalStatus, "failed");
+    assert.equal(saved?.turns[0].recoveryDisposition, null);
+  } finally {
+    await session.close();
+    await persistence.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("native mapping commit failure never records or dispatches the uncertain first prompt", async () => {
   const directory = await Deno.makeTempDir({
     prefix: "vantage-map-failure-",
@@ -660,8 +803,11 @@ Deno.test("process loss preserves accepted truth as unresolved and failed resume
   });
   await persistence.setSelectedProject("project", 2);
   const client = new DurableFakeCodex("/repo");
+  const events: SessionEvent[] = [];
   const session = new SessionController(
-    () => {},
+    (event) => {
+      events.push(event);
+    },
     () => client,
     (value) => Promise.resolve(String(value)),
   );
@@ -689,6 +835,27 @@ Deno.test("process loss preserves accepted truth as unresolved and failed resume
   assert.equal(saved?.turns[0].phase, "accepted");
   assert.equal(saved?.turns[0].recoveryDisposition, "incomplete_accepted");
   assert.equal(saved?.turns[0].terminalStatus, null);
+  assert.deepEqual(
+    events.slice(-2).map((event) => event.type),
+    ["turn_unresolved", "session_failed"],
+  );
+  const unresolved = events.at(-2);
+  assert.equal(
+    unresolved?.type === "turn_unresolved" &&
+      unresolved.recoveryLabel,
+    "Codex accepted this turn, but no terminal outcome was proven.",
+  );
+  assert.equal(
+    events.some((event) =>
+      event.type === "turn_terminal" && event.status === "failed"
+    ),
+    false,
+  );
+  const sessionFailure = events.at(-1);
+  assert.equal(
+    sessionFailure?.type === "session_failed" ? sessionFailure.canRetry : null,
+    false,
+  );
   await session.close();
 
   await persistence.markNativeNonResumable({
@@ -940,6 +1107,31 @@ Deno.test("mapping, begin, acceptance, append, and terminal storage failures blo
         false,
       );
       assert.equal(events.at(-1)?.type, "session_failed");
+      const unresolvedEvents = events.filter((event) =>
+        event.type === "turn_unresolved"
+      );
+      if (point === "accept" || point === "append" || point === "finish") {
+        assert.equal(unresolvedEvents.length, 1);
+        assert.deepEqual(
+          events.slice(-2).map((event) => event.type),
+          ["turn_unresolved", "session_failed"],
+        );
+        assert.equal(
+          events.some((event) =>
+            event.type === "turn_terminal" && event.status === "failed"
+          ),
+          false,
+        );
+        const sessionFailure = events.at(-1);
+        assert.equal(
+          sessionFailure?.type === "session_failed"
+            ? sessionFailure.canRetry
+            : null,
+          false,
+        );
+      } else {
+        assert.equal(unresolvedEvents.length, 0);
+      }
       if (point === "mapping" || point === "begin") {
         assert.deepEqual(client.prompts, []);
       }

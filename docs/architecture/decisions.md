@@ -170,10 +170,13 @@ read-only/never-approve policy and returned that same ID. Vantage does not send
 its transcript as replacement history and does not silently start a new native
 thread after missing, incompatible, or failed resume.
 
-Saved source can remain visible as read-only history when native continuity is
-unavailable, but it must be labeled non-resumable. Uncertain prompts are never
-replayed; incomplete source never becomes completed because a process ended.
-This conservative boundary preserves native ownership and terminal truth.
+Saved source remains visible as read-only history when native continuity is
+unavailable. A missing, incompatible, or failed native resume is labeled
+non-resumable. Temporary repository unavailability instead blocks launch without
+changing the saved native resume state; restoring the same canonical root may
+resume only the same saved ID. Uncertain prompts are never replayed; incomplete
+source never becomes completed or failed merely because a process ended. This
+conservative boundary preserves native ownership and terminal truth.
 
 ## Behavioral checks attached to issue #27
 

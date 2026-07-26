@@ -46,6 +46,11 @@ interface DurableTurn {
   accepted: boolean;
 }
 
+interface UnresolvedTurnProjection {
+  readonly recoveryLabel: string;
+  readonly action: string;
+}
+
 export type SessionPersistence = Pick<
   PersistenceOwner,
   | "setNativeThread"
@@ -459,17 +464,20 @@ export class SessionController {
     }
     if (event.type === "terminal" && event.status) {
       if (event.nativeTruth === false) {
+        const unresolved = this.#unresolvedTurnProjection();
         await this.#reconcileCurrent("crash");
         this.#phase = "failed";
         this.#durableTurn = null;
         this.#resolveTerminalWaiter();
+        if (unresolved) await this.#projectUnresolvedTurn(unresolved);
         await this.eventSink({
           type: "session_failed",
           code: "codex_start",
           message: event.message ??
             "Codex stopped before native terminal truth was received.",
-          action: event.action ??
-            "Keep the saved turn unresolved and retry the exact native conversation.",
+          action: unresolved?.action ?? event.action ??
+            "Reopen the repository session without replaying uncertain input.",
+          canRetry: unresolved === null,
         });
         return;
       } else if (
@@ -485,7 +493,21 @@ export class SessionController {
         });
         if (!this.#owns(generation, codex)) return;
       } else if (this.#durableTurn) {
+        const unresolved = this.#unresolvedTurnProjection();
         await this.#reconcileCurrent("crash");
+        this.#phase = "failed";
+        this.#resolveTerminalWaiter();
+        if (unresolved) await this.#projectUnresolvedTurn(unresolved);
+        await this.eventSink({
+          type: "session_failed",
+          code: "turn",
+          message:
+            "Codex reported a terminal outcome before durable native acceptance was proven.",
+          action: unresolved?.action ??
+            "Keep this saved turn read-only and do not replay it.",
+          canRetry: false,
+        });
+        return;
       }
       const canContinue = event.canContinue !== false;
       this.#phase = canContinue
@@ -558,6 +580,7 @@ export class SessionController {
   ): Promise<SessionSnapshot> {
     if (!this.#owns(generation, codex)) return this.snapshot();
     const failure = asVantageError(error);
+    const unresolved = this.#unresolvedTurnProjection();
     this.#phase = "failed";
     const cleanup = this.#detachCodex(codex);
     let storageFailure: unknown = null;
@@ -571,7 +594,20 @@ export class SessionController {
       });
     }
     if (storageFailure) {
-      await this.#projectDurabilityFailure(storageFailure);
+      await this.#projectDurabilityFailure(storageFailure, unresolved);
+      this.#resolveTerminalWaiter();
+      return this.snapshot();
+    }
+
+    if (unresolved) {
+      await this.#projectUnresolvedTurn(unresolved);
+      await this.eventSink({
+        type: "session_failed",
+        code: failure.code,
+        message: failure.message,
+        action: unresolved.action,
+        canRetry: false,
+      });
       this.#resolveTerminalWaiter();
       return this.snapshot();
     }
@@ -715,6 +751,7 @@ export class SessionController {
     codex: CodexSession,
   ): Promise<void> {
     if (!this.#owns(generation, codex)) return;
+    const unresolved = this.#unresolvedTurnProjection();
     this.#sessionGeneration++;
     this.#phase = "failed";
     const cleanup = this.#detachCodex(codex);
@@ -733,21 +770,53 @@ export class SessionController {
     }
     await this.#projectDurabilityFailure(
       reconciliationFailure ?? error,
+      unresolved,
     );
   }
 
-  async #projectDurabilityFailure(error: unknown): Promise<void> {
+  async #projectDurabilityFailure(
+    error: unknown,
+    unresolved: UnresolvedTurnProjection | null = null,
+  ): Promise<void> {
     const failure = error instanceof StorageError ? error : new StorageError(
       "storage_write",
       "Vantage could not preserve the saved conversation state.",
       "Preserve the database, stop this session, and retry without replaying the prompt.",
       { cause: error },
     );
+    if (unresolved) await this.#projectUnresolvedTurn(unresolved);
     await this.eventSink({
       type: "session_failed",
       code: failure.code,
       message: failure.message,
-      action: failure.action,
+      action: unresolved
+        ? unresolved.action + " Preserve the database for later recovery."
+        : failure.action,
+      canRetry: unresolved === null,
+    });
+  }
+
+  #unresolvedTurnProjection(): UnresolvedTurnProjection | null {
+    if (!this.#durableTurn) return null;
+    const recoveryLabel = !this.#durableTurn.accepted
+      ? "Prompt acceptance is uncertain. It was not replayed."
+      : this.#durableTurn.sequence === 0
+      ? "Codex accepted this turn, but no terminal outcome was proven."
+      : "This response is incomplete. Saved source is shown exactly.";
+    return {
+      recoveryLabel,
+      action:
+        "This saved turn is read-only. Automatic replay and transcript reconstruction are disabled; no reconciliation retry is available in this milestone.",
+    };
+  }
+
+  async #projectUnresolvedTurn(
+    unresolved: UnresolvedTurnProjection,
+  ): Promise<void> {
+    await this.eventSink({
+      type: "turn_unresolved",
+      recoveryLabel: unresolved.recoveryLabel,
+      action: unresolved.action,
     });
   }
 

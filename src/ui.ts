@@ -14,6 +14,170 @@ export interface ProjectRemovalTransition extends ProjectRemovalUiState {
   readonly shouldResetConversation: boolean;
 }
 
+export interface ConversationPresentationProject {
+  readonly canonicalRoot: string;
+  readonly availability: string;
+  readonly unavailableMessage: string | null;
+  readonly unavailableAction: string | null;
+}
+
+export interface ConversationPresentationSaved {
+  readonly readOnly: boolean;
+  readonly nativeResumeFailure: string | null;
+  readonly turns: readonly unknown[];
+}
+
+export type ConversationPresentationMode =
+  | "empty"
+  | "repository_unavailable"
+  | "recovered_unresolved"
+  | "native_non_resumable"
+  | "opening"
+  | "ready";
+
+export interface ConversationPresentation<
+  Saved extends ConversationPresentationSaved = ConversationPresentationSaved,
+> {
+  readonly mode: ConversationPresentationMode;
+  readonly savedConversation: Saved | null;
+  readonly showUnavailable: boolean;
+  readonly showConversation: boolean;
+  readonly restoreTranscript: boolean;
+  readonly composerReady: boolean;
+  readonly canRetryNative: boolean;
+  readonly statusKind: "neutral" | "failed" | null;
+  readonly statusTitle: string | null;
+  readonly statusDetail: string | null;
+}
+
+export interface AvailabilityRefreshProject {
+  readonly id: string;
+  readonly canonicalRoot: string;
+  readonly availability: string;
+}
+
+export function shouldActivateAfterAvailabilityRefresh(
+  previous: AvailabilityRefreshProject | null,
+  current: AvailabilityRefreshProject | null,
+): boolean {
+  return previous !== null &&
+    current !== null &&
+    previous.id === current.id &&
+    previous.canonicalRoot === current.canonicalRoot &&
+    previous.availability !== "available" &&
+    current.availability === "available";
+}
+
+export interface UnresolvedTurnProjection {
+  readonly turnActive: false;
+  readonly composerReady: false;
+  readonly terminalClass: "message-terminal unresolved";
+  readonly terminalText: string;
+}
+
+export function deriveUnresolvedTurnProjection(
+  recoveryLabel: string,
+): UnresolvedTurnProjection {
+  return {
+    turnActive: false,
+    composerReady: false,
+    terminalClass: "message-terminal unresolved",
+    terminalText: "Unresolved · " + recoveryLabel,
+  };
+}
+
+export function deriveConversationPresentation<
+  Saved extends ConversationPresentationSaved,
+>(
+  selected: ConversationPresentationProject | null,
+  saved: Saved | null,
+  readyRepository: string | null,
+  turnActive: boolean,
+): ConversationPresentation<Saved> {
+  if (selected === null) {
+    return {
+      mode: "empty",
+      savedConversation: null,
+      showUnavailable: false,
+      showConversation: false,
+      restoreTranscript: false,
+      composerReady: false,
+      canRetryNative: false,
+      statusKind: null,
+      statusTitle: null,
+      statusDetail: null,
+    };
+  }
+
+  if (selected.availability !== "available") {
+    const message = selected.unavailableMessage ||
+      "The saved repository is unavailable.";
+    const action = selected.unavailableAction ||
+      "Restore the saved path, refresh availability, or remove this project.";
+    return {
+      mode: "repository_unavailable",
+      savedConversation: saved,
+      showUnavailable: true,
+      showConversation: saved !== null,
+      restoreTranscript: saved !== null,
+      composerReady: false,
+      canRetryNative: false,
+      statusKind: "failed",
+      statusTitle: "Project unavailable · saved history is read-only",
+      statusDetail: message + " " + action +
+        " Vantage will not start Codex or retarget this conversation while the exact canonical root is unavailable.",
+    };
+  }
+
+  if (saved?.readOnly) {
+    if (saved.nativeResumeFailure !== null) {
+      return {
+        mode: "native_non_resumable",
+        savedConversation: saved,
+        showUnavailable: false,
+        showConversation: true,
+        restoreTranscript: !turnActive,
+        composerReady: false,
+        canRetryNative: true,
+        statusKind: "failed",
+        statusTitle: "Saved conversation is read-only",
+        statusDetail: "Native resume is " +
+          saved.nativeResumeFailure.replaceAll("_", " ") +
+          ". Retry only the exact saved native ID, or remove this project. Vantage will not start a replacement conversation.",
+      };
+    }
+    return {
+      mode: "recovered_unresolved",
+      savedConversation: saved,
+      showUnavailable: false,
+      showConversation: true,
+      restoreTranscript: !turnActive,
+      composerReady: false,
+      canRetryNative: false,
+      statusKind: "failed",
+      statusTitle: "Saved conversation is read-only",
+      statusDetail:
+        "An unresolved saved turn is preserved exactly. Automatic replay and transcript reconstruction are disabled; no reconciliation retry is available in this milestone.",
+    };
+  }
+
+  const ready = readyRepository === selected.canonicalRoot;
+  return {
+    mode: ready ? "ready" : "opening",
+    savedConversation: saved,
+    showUnavailable: false,
+    showConversation: saved !== null,
+    restoreTranscript: saved !== null && !turnActive,
+    composerReady: ready && !turnActive,
+    canRetryNative: false,
+    statusKind: ready ? null : "neutral",
+    statusTitle: ready ? null : "Saved conversation loaded",
+    statusDetail: ready
+      ? null
+      : "Saved history remains read-only while Vantage starts or resumes the exact native conversation.",
+  };
+}
+
 export function transitionProjectRemoval(
   projectId: string,
   selectedProjectId: string | null,
@@ -676,6 +840,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .message-terminal { margin: 9px 0 0; color: #7f8d98; font-size: 11px; }
 .message-terminal.completed { color: #72c39d; }
 .message-terminal.interrupted, .message-terminal.failed { color: #df8b82; }
+.message-terminal.unresolved { color: #d9ad61; }
 
 .composer-footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 10px; }
 .composer-footer button { min-height: 42px; }
@@ -716,6 +881,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   "use strict";
 
+  const deriveConversationPresentation = (${deriveConversationPresentation.toString()});
+  const deriveUnresolvedTurnProjection = (${deriveUnresolvedTurnProjection.toString()});
+  const shouldActivateAfterAvailabilityRefresh = (${shouldActivateAfterAvailabilityRefresh.toString()});
   const transitionProjectRemoval = (${transitionProjectRemoval.toString()});
   const nativeBindings = globalThis.bindings;
   const repositoryForm = document.querySelector("#repository-form");
@@ -865,6 +1033,12 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     registry = snapshot;
     renderProjects();
     const selected = selectedProject();
+    const presentation = deriveConversationPresentation(
+      selected,
+      snapshot.conversation,
+      readyRepository,
+      turnActive,
+    );
     workspaceEmpty.hidden = selected !== null;
     workspaceRemove.hidden = selected === null;
     if (!selected) {
@@ -878,39 +1052,34 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
 
     workspaceTitle.textContent = selected.name;
     workspacePath.textContent = selected.canonicalRoot;
-    if (selected.availability !== "available") {
-      resetConversation();
-      projectUnavailable.hidden = false;
-      unavailableTitle.textContent = selected.unavailableMessage || "The saved repository is unavailable.";
-      unavailableDetail.textContent = selected.unavailableAction || "Restore the saved path or remove this project.";
-      setStatus("failed", "Project unavailable", unavailableTitle.textContent + " " + unavailableDetail.textContent);
-      return;
+    projectUnavailable.hidden = !presentation.showUnavailable;
+    if (presentation.showUnavailable) {
+      unavailableTitle.textContent = selected.unavailableMessage ||
+        "The saved repository is unavailable.";
+      unavailableDetail.textContent = selected.unavailableAction ||
+        "Restore the saved path, refresh availability, or remove this project.";
     }
-
-    projectUnavailable.hidden = true;
-    if (!turnActive) restoreConversation(snapshot.conversation);
-    conversation.hidden = false;
-    if (snapshot.conversation && snapshot.conversation.readOnly) {
-      sessionReady = false;
-      setComposerReady(false);
-      const reason = snapshot.conversation.nativeResumeFailure
-        ? "Native resume is " + snapshot.conversation.nativeResumeFailure.replaceAll("_", " ") + "."
-        : "An unresolved saved turn requires conservative reconciliation.";
+    if (presentation.restoreTranscript) {
+      restoreConversation(presentation.savedConversation);
+    }
+    conversation.hidden = !presentation.showConversation;
+    sessionReady = presentation.mode === "ready";
+    if (presentation.mode === "repository_unavailable") {
+      readyRepository = null;
+      turnActive = false;
+    }
+    setComposerReady(presentation.composerReady);
+    if (
+      presentation.statusKind !== null &&
+      presentation.statusTitle !== null &&
+      presentation.statusDetail !== null
+    ) {
       setStatus(
-        "failed",
-        "Saved conversation is read-only",
-        reason + " Retry the exact native resume or remove this project.",
-        snapshot.conversation.nativeResumeFailure !== null,
+        presentation.statusKind,
+        presentation.statusTitle,
+        presentation.statusDetail,
+        presentation.canRetryNative,
       );
-      return;
-    }
-    if (readyRepository === selected.canonicalRoot) {
-      sessionReady = true;
-      conversation.hidden = false;
-      setComposerReady(!turnActive);
-    } else if (!turnActive) {
-      conversation.hidden = true;
-      setComposerReady(false);
     }
   };
 
@@ -1009,11 +1178,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
       if (result && result.ok) {
         applyRegistry(result.snapshot);
         const current = selectedProject();
-        if (
-          previous && current &&
-          previous.availability !== "available" &&
-          current.availability === "available"
-        ) {
+        if (shouldActivateAfterAvailabilityRefresh(previous, current)) {
           await activateCurrent(true);
         }
       } else hostFailure(result, "Saved projects could not be checked.");
@@ -1087,6 +1252,22 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     }
   };
 
+  const setTurnUnresolved = (event) => {
+    const projection = deriveUnresolvedTurnProjection(event.recoveryLabel);
+    turnActive = projection.turnActive;
+    if (activeAssistant) {
+      try {
+        renderAssistant(activeAssistant);
+      } finally {
+        activeAssistant.terminal.hidden = false;
+        activeAssistant.terminal.className = projection.terminalClass;
+        activeAssistant.terminal.textContent = projection.terminalText;
+      }
+    }
+    setRepositoryBusy(registryBusy);
+    setComposerReady(projection.composerReady);
+  };
+
   const nativeErrorText = (error) => {
     if (error && typeof error.message === "string") return error.message;
     return "The native host rejected the request.";
@@ -1148,13 +1329,27 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         }
         if (event.canContinue === true) promptInput.focus();
         break;
+      case "turn_unresolved":
+        setTurnUnresolved(event);
+        setStatus(
+          "failed",
+          "Saved turn is unresolved",
+          event.action,
+          false,
+        );
+        break;
       case "session_failed":
         sessionReady = false;
         readyRepository = null;
         turnActive = false;
         setComposerReady(false);
         setRepositoryBusy(registryBusy);
-        setStatus("failed", event.message, event.action, true);
+        setStatus(
+          "failed",
+          event.message,
+          event.action,
+          event.canRetry !== false,
+        );
         break;
     }
   };
@@ -1280,8 +1475,9 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         return;
       }
       applyRegistry(result.snapshot);
+      const selected = selectedProject();
       if (
-        result.snapshot.selectedProjectId !== null &&
+        selected && selected.availability === "available" &&
         !(result.snapshot.conversation &&
           result.snapshot.conversation.readOnly)
       ) {

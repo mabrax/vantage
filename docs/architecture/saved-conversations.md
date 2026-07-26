@@ -56,7 +56,12 @@ Milestone 3 identity.
 
 A missing root does not delete or rewrite registration state. It makes the
 project unavailable and blocks native launch until the same canonical root is
-accessible again or the user explicitly removes the project.
+accessible again or the user explicitly removes the project. Saved prompts,
+ordered raw assistant source, and terminal/recovery labels remain visible
+read-only while unavailable; temporary repository unavailability does not change
+the native resume state. Refresh after restoring the exact project ID and
+canonical root may resume only the already mapped native thread. A moved,
+aliased, or identity-changed root is never treated as that restoration.
 
 ## Database location and ownership
 
@@ -271,7 +276,10 @@ Milestone 3 does not automatically reconstruct an incomplete response from lossy
 native history. An unresolved recovered turn therefore makes the conversation
 read-only/non-resumable for new work unless a later, separately validated
 reconciliation can prove exact identity and terminal/source compatibility. No
-prompt is replayed to repair uncertainty.
+prompt is replayed to repair uncertainty. The current UI exposes no retry for
+this state and immediately labels an active bubble `Unresolved` with the same
+conservative recovery text committed to durable storage. Only a natively
+reported and durably committed `failed` terminal is presented as `Failed`.
 
 ## Single live session and switching
 
