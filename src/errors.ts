@@ -4,6 +4,9 @@ export type VantageErrorCode =
   | "authentication"
   | "codex_start"
   | "turn"
+  | "project_duplicate"
+  | "project_missing"
+  | "removal_confirmation"
   | "closed"
   | "invalid_command";
 

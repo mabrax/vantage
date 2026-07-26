@@ -9,6 +9,7 @@ import type {
   PersistenceOperation,
   PersistenceRequest,
   PersistenceResponse,
+  ProjectRegistrySnapshot,
   ReconcileInput,
   ScopedConversationInput,
   SerializedStorageError,
@@ -110,9 +111,48 @@ export class PersistenceOwner {
     });
   }
 
-  removeProject(projectId: string): Promise<void> {
+  removeProject(
+    projectId: string,
+    nextSelectedProjectId?: string | null,
+    updatedAt?: number,
+  ): Promise<void> {
     validateId(projectId, "project ID");
-    return this.#voidRequest({ type: "remove_project", projectId });
+    if (nextSelectedProjectId !== undefined && nextSelectedProjectId !== null) {
+      validateId(nextSelectedProjectId, "selected project ID");
+    }
+    if (nextSelectedProjectId !== undefined) {
+      if (updatedAt === undefined) {
+        throw invalidInput(
+          "A selection timestamp is required when removing a registered project.",
+        );
+      }
+      validateTimestamp(updatedAt);
+    }
+    return this.#voidRequest({
+      type: "remove_project",
+      projectId,
+      nextSelectedProjectId,
+      updatedAt,
+    });
+  }
+
+  setSelectedProject(
+    projectId: string | null,
+    updatedAt: number,
+  ): Promise<void> {
+    if (projectId !== null) validateId(projectId, "selected project ID");
+    validateTimestamp(updatedAt);
+    return this.#voidRequest({
+      type: "set_selected_project",
+      projectId,
+      updatedAt,
+    });
+  }
+
+  async readProjectRegistry(): Promise<ProjectRegistrySnapshot> {
+    return await this.#request({
+      type: "read_project_registry",
+    }) as ProjectRegistrySnapshot;
   }
 
   setNativeThread(input: SetNativeThreadInput): Promise<void> {

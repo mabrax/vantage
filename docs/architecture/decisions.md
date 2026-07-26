@@ -1,7 +1,8 @@
 # Architecture decision log
 
-This log records decisions that resolve conflicts in earlier notes or constrain the first vertical
-slice. New decisions should be appended; superseded decisions should link to their replacements.
+This log records decisions that resolve conflicts in earlier notes or constrain
+the first vertical slice. New decisions should be appended; superseded decisions
+should link to their replacements.
 
 ## D-001 — Use Deno Desktop instead of Tauri
 
@@ -9,12 +10,14 @@ Date: 2026-07-22
 
 Status: **Accepted**
 
-The original foundation named Tauri as fixed. Vantage will instead use `deno desktop`, introduced in
-Deno 2.9. It keeps the web UI and privileged TypeScript host in one toolchain and provides desktop
-packaging, local HTTP serving, WebView/CEF backends, and in-process bindings.
+The original foundation named Tauri as fixed. Vantage will instead use
+`deno desktop`, introduced in Deno 2.9. It keeps the web UI and privileged
+TypeScript host in one toolchain and provides desktop packaging, local HTTP
+serving, WebView/CEF backends, and in-process bindings.
 
-Because the feature is currently experimental, Vantage will pin a Deno patch release, validate the
-packaged runtime early, and keep Deno Desktop-specific code at the application boundary.
+Because the feature is currently experimental, Vantage will pin a Deno patch
+release, validate the packaged runtime early, and keep Deno Desktop-specific
+code at the application boundary.
 
 ## D-002 — Implement Codex natively before designing provider adapters
 
@@ -22,13 +25,14 @@ Date: 2026-07-22
 
 Status: **Accepted**
 
-The original foundation proposed a common harness adapter shape before any complete integration.
-The inspected app-server design shows that Codex has native thread identity, server-initiated
-requests, approvals, event types, recovery rules, and versioned schemas that a premature common
-model could hide.
+The original foundation proposed a common harness adapter shape before any
+complete integration. The inspected app-server design shows that Codex has
+native thread identity, server-initiated requests, approvals, event types,
+recovery rules, and versioned schemas that a premature common model could hide.
 
-The first implementation therefore uses Codex names and semantics. A provider abstraction is
-deferred until Codex works end to end and a second provider supplies concrete comparative evidence.
+The first implementation therefore uses Codex names and semantics. A provider
+abstraction is deferred until Codex works end to end and a second provider
+supplies concrete comparative evidence.
 
 ## D-003 — Build the chat slice before files and terminal surfaces
 
@@ -36,10 +40,11 @@ Date: 2026-07-22
 
 Status: **Accepted**
 
-The old build sequence placed the file explorer and terminal before the agent runner. The first
-product proof is now project-scoped Codex chat: sidebar, threads, model selection, streamed turns,
-blocking interaction, and resume. Files, terminal, tasks, and flow remain product direction, but are
-not prerequisites for proving the core conversation.
+The old build sequence placed the file explorer and terminal before the agent
+runner. The first product proof is now project-scoped Codex chat: sidebar,
+threads, model selection, streamed turns, blocking interaction, and resume.
+Files, terminal, tasks, and flow remain product direction, but are not
+prerequisites for proving the core conversation.
 
 ## D-004 — Use one app-server process per live Vantage thread
 
@@ -47,11 +52,13 @@ Date: 2026-07-22
 
 Status: **Accepted through Milestone 3 by D-010**
 
-Although app-server can host multiple native threads, one child process per live Vantage thread
-gives simple ownership, a fixed working directory, approval correlation, and failure isolation.
-Processes are created lazily and can be reaped while the native thread remains durable.
+Although app-server can host multiple native threads, one child process per live
+Vantage thread gives simple ownership, a fixed working directory, approval
+correlation, and failure isolation. Processes are created lazily and can be
+reaped while the native thread remains durable.
 
-This choice should change only if measured startup time or memory becomes a real bottleneck.
+This choice should change only if measured startup time or memory becomes a real
+bottleneck.
 
 ## D-005 — Separate desktop commands from streamed events
 
@@ -59,13 +66,14 @@ Date: 2026-07-22
 
 Status: **Deferred for Milestone 1 by D-009**
 
-Deno Desktop bindings are a good typed request/response boundary but do not themselves expose a
-host-pushed stream. Vantage will use bindings for commands and snapshots, and a same-origin SSE
-route from the desktop `Deno.serve()` handler for ordered events. Sequence IDs provide reconnect
-behavior.
+Deno Desktop bindings are a good typed request/response boundary but do not
+themselves expose a host-pushed stream. Vantage will use bindings for commands
+and snapshots, and a same-origin SSE route from the desktop `Deno.serve()`
+handler for ordered events. Sequence IDs provide reconnect behavior.
 
-The protocol spike must validate this in the packaged WebView. If SSE is unreliable, the replacement
-must preserve the same snapshot-plus-sequence contract.
+The protocol spike must validate this in the packaged WebView. If SSE is
+unreliable, the replacement must preserve the same snapshot-plus-sequence
+contract.
 
 ## D-006 — Use local SQLite for Vantage-owned state
 
@@ -73,28 +81,31 @@ Date: 2026-07-22
 
 Status: **Accepted for Milestone 3 by D-010**
 
-Project registration, Vantage/native ID mappings, preferences, and ordered UI projections need
-transactional local persistence. Deno supports SQLite through `node:sqlite`, avoiding a service or a
-native dependency outside the runtime. Codex history and repository contents remain external
-sources of truth.
+Project registration, Vantage/native ID mappings, preferences, and ordered UI
+projections need transactional local persistence. Deno supports SQLite through
+`node:sqlite`, avoiding a service or a native dependency outside the runtime.
+Codex history and repository contents remain external sources of truth.
 
-Because `node:sqlite` is synchronous, one dedicated persistence worker owns the connection and
-serializes transactions so database work cannot block app-server stdout ingestion. The exact
-schema, migration, and recovery contract is accepted in
-[saved projects and conversations](saved-conversations.md).
+Because `node:sqlite` is synchronous, one dedicated persistence worker owns the
+connection and serializes transactions so database work cannot block app-server
+stdout ingestion. The exact schema, migration, and recovery contract is accepted
+in [saved projects and conversations](saved-conversations.md).
 
 ## D-007 — Register projects by validated path in the first slice
 
 Date: 2026-07-22
 
-Status: **Accepted path identity; saved registration scheduled in Milestone 3 issue #26**
+Status: **Accepted and implemented through Milestone 3 issue #26**
 
-Deno Desktop does not currently provide a first-class native folder picker. The first slice accepts
-a pasted or typed path, canonicalizes it, and verifies that it is an accessible Git repository.
-D-010 accepts that canonical root as the durable unique project key; issue #26
-owns saved registration and sidebar behavior.
+Deno Desktop does not currently provide a first-class native folder picker. The
+first slice accepts a pasted or typed path, canonicalizes it, and verifies that
+it is an accessible Git repository. D-010 accepts that canonical root as the
+durable unique project key. Issue #26 implements saved registration, ordered
+sidebar selection, availability, and non-destructive removal around that
+identity.
 
-A native picker can replace the input when the runtime adds one or a focused integration is proven.
+A native picker can replace the input when the runtime adds one or a focused
+integration is proven.
 
 ## D-008 — Keep thread and live session distinct
 
@@ -102,10 +113,11 @@ Date: 2026-07-22
 
 Status: **Accepted durable boundary for Milestone 3 by D-010**
 
-Earlier notes used session for both historical work and a running harness. Vantage uses **thread**
-for a native conversation, **turn** for one request, and **live session** for the disposable
-app-server connection. Milestone 1 kept all three in one open app session. Milestone 3 persists the
-Vantage thread/native-thread mapping while keeping the app-server connection disposable.
+Earlier notes used session for both historical work and a running harness.
+Vantage uses **thread** for a native conversation, **turn** for one request, and
+**live session** for the disposable app-server connection. Milestone 1 kept all
+three in one open app session. Milestone 3 persists the Vantage
+thread/native-thread mapping while keeping the app-server connection disposable.
 
 ## D-009 — Prove a session-only conversation before durable infrastructure
 
@@ -113,14 +125,16 @@ Date: 2026-07-23
 
 Status: **Accepted for Milestone 1; persistence deferral superseded by D-010**
 
-Milestone 1 is reduced to one selected Git repository, one in-memory native Codex thread, sequential
-read-only turns, streamed assistant text, interruption, and process cleanup in a packaged desktop
-app. This is the smallest consumer-visible test of whether Vantage adds value as a Codex workspace.
+Milestone 1 is reduced to one selected Git repository, one in-memory native
+Codex thread, sequential read-only turns, streamed assistant text, interruption,
+and process cleanup in a packaged desktop app. This is the smallest
+consumer-visible test of whether Vantage adds value as a Codex workspace.
 
-SQLite, saved projects and threads, restart recovery, model and runtime selectors, approvals, rich
-activity, generalized event transport, full protocol generation, coverage certification, stress
-programs, and multi-platform claims are deferred. They may be proposed only as later product
-verticals; they are not prerequisites for learning from the session-only conversation.
+SQLite, saved projects and threads, restart recovery, model and runtime
+selectors, approvals, rich activity, generalized event transport, full protocol
+generation, coverage certification, stress programs, and multi-platform claims
+are deferred. They may be proposed only as later product verticals; they are not
+prerequisites for learning from the session-only conversation.
 
 ## D-010 — Adopt one serialized SQLite owner for saved conversations
 
@@ -128,17 +142,21 @@ Date: 2026-07-26
 
 Status: **Accepted**
 
-The authenticated native-resume kill gate passed across two distinct app-server processes. Vantage
-will therefore promote D-006 and the durable half of D-008 for Milestone 3.
+The authenticated native-resume kill gate passed across two distinct app-server
+processes. Vantage will therefore promote D-006 and the durable half of D-008
+for Milestone 3.
 
-One module worker owns one `node:sqlite` connection and serializes typed transactional operations.
-The WebView receives only validated snapshots and events. The versioned strict schema stores the
-canonical project registry, one conversation per project, native mapping, literal prompts, ordered
-raw assistant source, native acceptance, terminal truth, and non-secret preferences. Codex history
-and repositories remain external. Exact schema, migration, reconciliation, corruption, removal,
-and re-add semantics live in [saved projects and conversations](saved-conversations.md).
+One module worker owns one `node:sqlite` connection and serializes typed
+transactional operations. The WebView receives only validated snapshots and
+events. The versioned strict schema stores the canonical project registry, one
+conversation per project, native mapping, literal prompts, ordered raw assistant
+source, native acceptance, terminal truth, and non-secret preferences. Codex
+history and repositories remain external. Exact schema, migration,
+reconciliation, corruption, removal, and re-add semantics live in
+[saved projects and conversations](saved-conversations.md).
 
-This decision does not activate the issue #26 sidebar or issue #27 relaunch/switching UI.
+This decision does not activate the issue #26 sidebar or issue #27
+relaunch/switching UI.
 
 ## D-011 — Resume exact native identity; never imitate continuity with transcript replay
 
@@ -146,12 +164,13 @@ Date: 2026-07-26
 
 Status: **Accepted**
 
-A resumable Vantage conversation means a new authenticated app-server successfully resumed the
-persisted native Codex thread ID under the fixed read-only/never-approve policy and returned that
-same ID. Vantage does not send its transcript as replacement history and does not silently start a
-new native thread after missing, incompatible, or failed resume.
+A resumable Vantage conversation means a new authenticated app-server
+successfully resumed the persisted native Codex thread ID under the fixed
+read-only/never-approve policy and returned that same ID. Vantage does not send
+its transcript as replacement history and does not silently start a new native
+thread after missing, incompatible, or failed resume.
 
-Saved source can remain visible as read-only history when native continuity is unavailable, but it
-must be labeled non-resumable. Uncertain prompts are never replayed; incomplete source never
-becomes completed because a process ended. This conservative boundary preserves native ownership
-and terminal truth.
+Saved source can remain visible as read-only history when native continuity is
+unavailable, but it must be labeled non-resumable. Uncertain prompts are never
+replayed; incomplete source never becomes completed because a process ended.
+This conservative boundary preserves native ownership and terminal truth.

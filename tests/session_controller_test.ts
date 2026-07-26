@@ -10,13 +10,15 @@ class FakeCodex implements CodexSession {
   interrupts = 0;
   prompts: string[] = [];
   onTurnEvent: ((event: NativeTurnEvent) => void) | null = null;
+  initializeGate: Promise<void> = Promise.resolve();
   startGate: Promise<void> = Promise.resolve();
+  interruptGate: Promise<void> = Promise.resolve();
   initializeError: unknown = null;
 
-  initialize(): Promise<void> {
+  async initialize(): Promise<void> {
     this.initialized++;
-    if (this.initializeError) return Promise.reject(this.initializeError);
-    return Promise.resolve();
+    await this.initializeGate;
+    if (this.initializeError) throw this.initializeError;
   }
 
   async startTurn(
@@ -28,9 +30,9 @@ class FakeCodex implements CodexSession {
     await this.startGate;
   }
 
-  interruptTurn(): Promise<void> {
+  async interruptTurn(): Promise<void> {
     this.interrupts++;
-    return Promise.resolve();
+    await this.interruptGate;
   }
 
   shutdown(): Promise<void> {
@@ -45,6 +47,14 @@ class FakeCodex implements CodexSession {
 
 function flushEvents(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  assert.fail("Timed out waiting for the deferred operation to start.");
 }
 
 function harness(fake = new FakeCodex()) {
@@ -88,6 +98,33 @@ Deno.test("invalid repositories launch no Codex process and remain retryable", a
 
   assert.equal((await h.controller.startSession("/repo")).phase, "ready");
   assert.equal(h.factoryCalls(), 1);
+});
+
+Deno.test("registered project launch rejects an identity change before Codex starts", async () => {
+  let factoryCalls = 0;
+  const events: SessionEvent[] = [];
+  const controller = new SessionController(
+    (event) => {
+      events.push(event);
+    },
+    () => {
+      factoryCalls++;
+      return new FakeCodex();
+    },
+    () => Promise.resolve("/different-canonical-root"),
+  );
+
+  const snapshot = await controller.startSession(
+    "/saved-root",
+    "/saved-root",
+  );
+  assert.equal(snapshot.phase, "failed");
+  assert.equal(factoryCalls, 0);
+  assert.equal(events[0].type, "session_failed");
+  assert.match(
+    events[0].type === "session_failed" ? events[0].message : "",
+    /different Git repository/,
+  );
 });
 
 Deno.test("only one prompt is accepted while native acceptance is pending", async () => {
@@ -287,4 +324,243 @@ Deno.test("closing an idle or active session reaps the owned process", async () 
   assert.equal(active.controller.snapshot().phase, "closed");
   gate.resolve();
   await pending;
+
+  const startingFake = new FakeCodex();
+  const initialization = Promise.withResolvers<void>();
+  startingFake.initializeGate = initialization.promise;
+  const starting = harness(startingFake);
+  const pendingStart = starting.controller.startSession("/repo");
+  await waitFor(() => startingFake.initialized === 1);
+  await starting.controller.close();
+  initialization.reject(new Error("late initialization after close"));
+  await pendingStart;
+  assert.equal(startingFake.shutdowns, 1);
+  assert.deepEqual(starting.controller.snapshot(), {
+    phase: "closed",
+    repository: null,
+  });
+  assert.deepEqual(starting.events, []);
+});
+
+Deno.test("late native events from a replaced project cannot cross into the selected session", async () => {
+  const first = new FakeCodex();
+  const second = new FakeCodex();
+  const clients = [first, second];
+  const events: SessionEvent[] = [];
+  const controller = new SessionController(
+    (event) => {
+      events.push(event);
+    },
+    () => clients.shift()!,
+    (path) => Promise.resolve(String(path)),
+  );
+
+  await controller.startSession("/first");
+  await controller.submitPrompt("old project prompt");
+  first.emit({ type: "accepted" });
+  first.emit({
+    type: "terminal",
+    status: "completed",
+    canContinue: true,
+  });
+  await flushEvents();
+
+  await controller.startSession("/second");
+  const eventCount = events.length;
+  first.emit({ type: "delta", delta: "late crossed source" });
+  first.emit({
+    type: "terminal",
+    status: "failed",
+    canContinue: false,
+  });
+  await flushEvents();
+
+  assert.equal(events.length, eventCount);
+  assert.deepEqual(controller.snapshot(), {
+    phase: "ready",
+    repository: "/second",
+  });
+  assert.equal(first.shutdowns, 1);
+  assert.equal(second.shutdowns, 0);
+  await controller.close();
+});
+
+Deno.test("reaping deferred initialization isolates both late resolution and rejection from the replacement", async () => {
+  for (const outcome of ["resolve", "reject"] as const) {
+    const oldCodex = new FakeCodex();
+    const initialization = Promise.withResolvers<void>();
+    oldCodex.initializeGate = initialization.promise;
+    const nextCodex = new FakeCodex();
+    const clients = [oldCodex, nextCodex];
+    const events: SessionEvent[] = [];
+    const controller = new SessionController(
+      (event) => {
+        events.push(event);
+      },
+      () => clients.shift()!,
+      (path) => Promise.resolve(String(path)),
+    );
+
+    const oldStart = controller.startSession("/old");
+    await waitFor(() => oldCodex.initialized === 1);
+    assert.deepEqual(controller.snapshot(), {
+      phase: "starting",
+      repository: null,
+    });
+
+    await controller.reapSession();
+    assert.equal(oldCodex.shutdowns, 1);
+    await controller.startSession("/next");
+    const eventCount = events.length;
+
+    if (outcome === "resolve") initialization.resolve();
+    else initialization.reject(new Error("late old initialization failure"));
+    await oldStart;
+    await flushEvents();
+
+    assert.deepEqual(controller.snapshot(), {
+      phase: "ready",
+      repository: "/next",
+    });
+    assert.equal(oldCodex.shutdowns, 1);
+    assert.equal(nextCodex.shutdowns, 0);
+    assert.equal(events.length, eventCount);
+    assert.deepEqual(
+      events.map((event) =>
+        event.type === "repository_ready" ? event.repository : event.type
+      ),
+      ["/next"],
+    );
+    await controller.close();
+  }
+});
+
+Deno.test("a deferred old startTurn rejection and late callbacks cannot fail or dispose the replacement", async () => {
+  const oldCodex = new FakeCodex();
+  const turnStart = Promise.withResolvers<void>();
+  oldCodex.startGate = turnStart.promise;
+  const nextCodex = new FakeCodex();
+  const clients = [oldCodex, nextCodex];
+  const events: SessionEvent[] = [];
+  const controller = new SessionController(
+    (event) => {
+      events.push(event);
+    },
+    () => clients.shift()!,
+    (path) => Promise.resolve(String(path)),
+  );
+
+  await controller.startSession("/old");
+  const oldSubmit = controller.submitPrompt("old prompt");
+  await waitFor(() => oldCodex.prompts.length === 1);
+  await controller.reapSession();
+  await controller.startSession("/next");
+  const eventCount = events.length;
+
+  turnStart.reject(new Error("late old startTurn failure"));
+  await oldSubmit;
+  oldCodex.emit({ type: "accepted" });
+  oldCodex.emit({ type: "delta", delta: "late old text" });
+  oldCodex.emit({
+    type: "terminal",
+    status: "failed",
+    canContinue: false,
+  });
+  await flushEvents();
+
+  assert.deepEqual(controller.snapshot(), {
+    phase: "ready",
+    repository: "/next",
+  });
+  assert.equal(oldCodex.shutdowns, 1);
+  assert.equal(nextCodex.shutdowns, 0);
+  assert.equal(events.length, eventCount);
+  assert.equal(
+    events.slice(eventCount).some((event) =>
+      event.type === "turn_terminal" || event.type === "session_failed"
+    ),
+    false,
+  );
+  await controller.close();
+});
+
+Deno.test("reaping while turn_pending is deferred prevents the stale operation from starting a turn", async () => {
+  const oldCodex = new FakeCodex();
+  const nextCodex = new FakeCodex();
+  const clients = [oldCodex, nextCodex];
+  const turnPending = Promise.withResolvers<void>();
+  let pendingEventEntered = false;
+  const events: SessionEvent[] = [];
+  const controller = new SessionController(
+    async (event) => {
+      events.push(event);
+      if (event.type === "turn_pending") {
+        pendingEventEntered = true;
+        await turnPending.promise;
+      }
+    },
+    () => clients.shift()!,
+    (path) => Promise.resolve(String(path)),
+  );
+
+  await controller.startSession("/old");
+  const oldSubmit = controller.submitPrompt("old prompt");
+  await waitFor(() => pendingEventEntered);
+  await controller.reapSession();
+  await controller.startSession("/next");
+  const eventCount = events.length;
+
+  turnPending.resolve();
+  await oldSubmit;
+  assert.deepEqual(oldCodex.prompts, []);
+  assert.equal(events.length, eventCount);
+  assert.deepEqual(controller.snapshot(), {
+    phase: "ready",
+    repository: "/next",
+  });
+  assert.equal(oldCodex.shutdowns, 1);
+  assert.equal(nextCodex.shutdowns, 0);
+  await controller.close();
+});
+
+Deno.test("a deferred stop failure cannot dispose or emit across a replacement", async () => {
+  const oldCodex = new FakeCodex();
+  const interruption = Promise.withResolvers<void>();
+  oldCodex.interruptGate = interruption.promise;
+  const nextCodex = new FakeCodex();
+  const clients = [oldCodex, nextCodex];
+  const events: SessionEvent[] = [];
+  const controller = new SessionController(
+    (event) => {
+      events.push(event);
+    },
+    () => clients.shift()!,
+    (path) => Promise.resolve(String(path)),
+  );
+
+  await controller.startSession("/old");
+  await controller.submitPrompt("old prompt");
+  const oldStop = controller.stopTurn();
+  await waitFor(() => oldCodex.interrupts === 1);
+  await controller.reapSession();
+  await controller.startSession("/next");
+  const eventCount = events.length;
+
+  interruption.reject(new Error("late old interruption failure"));
+  await oldStop;
+  oldCodex.emit({
+    type: "terminal",
+    status: "interrupted",
+    canContinue: true,
+  });
+  await flushEvents();
+
+  assert.deepEqual(controller.snapshot(), {
+    phase: "ready",
+    repository: "/next",
+  });
+  assert.equal(oldCodex.shutdowns, 1);
+  assert.equal(nextCodex.shutdowns, 0);
+  assert.equal(events.length, eventCount);
+  await controller.close();
 });

@@ -1,5 +1,43 @@
 import { MARKDOWN_JAVASCRIPT } from "./markdown.ts";
 
+export interface ProjectRemovalUiState {
+  readonly sessionReady: boolean;
+  readonly turnActive: boolean;
+  readonly readyRepository: string | null;
+  readonly activeAssistant: unknown | null;
+  readonly assistantMessages: readonly unknown[];
+  readonly composerEnabled: boolean;
+}
+
+export interface ProjectRemovalTransition extends ProjectRemovalUiState {
+  readonly removesSelectedProject: boolean;
+  readonly shouldResetConversation: boolean;
+}
+
+export function transitionProjectRemoval(
+  projectId: string,
+  selectedProjectId: string | null,
+  state: ProjectRemovalUiState,
+): ProjectRemovalTransition {
+  if (projectId !== selectedProjectId) {
+    return {
+      ...state,
+      removesSelectedProject: false,
+      shouldResetConversation: false,
+    };
+  }
+  return {
+    sessionReady: false,
+    turnActive: false,
+    readyRepository: null,
+    activeAssistant: null,
+    assistantMessages: [],
+    composerEnabled: false,
+    removesSelectedProject: true,
+    shouldResetConversation: true,
+  };
+}
+
 export const HTML = `<!doctype html>
 <html lang="en">
   <head>
@@ -14,68 +52,109 @@ export const HTML = `<!doctype html>
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <main>
-      <header class="brand">
-        <div class="mark" aria-hidden="true">V</div>
-        <div>
-          <p class="eyebrow">Vantage · local Codex workspace</p>
-          <h1>Talk with Codex about one repository.</h1>
-          <p class="lede">Your repository stays local. Vantage uses your existing Codex installation with read-only access.</p>
-        </div>
-      </header>
-
-      <section class="panel" aria-labelledby="repository-heading">
-        <div class="section-heading">
-          <span class="step">01</span>
+    <div class="app-shell">
+      <aside class="sidebar" aria-labelledby="projects-heading">
+        <header class="brand">
+          <div class="mark" aria-hidden="true">V</div>
           <div>
-            <h2 id="repository-heading">Choose a Git repository</h2>
-            <p id="repository-help">Paste an accessible local path. Vantage validates it before starting Codex.</p>
+            <p class="eyebrow">Vantage</p>
+            <h1>Projects</h1>
           </div>
+        </header>
+
+        <div class="sidebar-heading">
+          <div>
+            <h2 id="projects-heading">Saved Git projects</h2>
+            <p>Canonical local roots, kept in registration order.</p>
+          </div>
+          <button id="refresh-projects" class="icon-button" type="button" title="Check saved project availability" aria-label="Check saved project availability">↻</button>
         </div>
-        <form id="repository-form">
-          <label for="repository-path">Local repository path</label>
-          <div class="input-row">
-            <input id="repository-path" name="repository" type="text" autocomplete="off" spellcheck="false" aria-describedby="repository-help" placeholder="/Users/you/code/project" required>
-            <button id="repository-submit" type="submit">Use repository</button>
-          </div>
+
+        <div id="project-empty" class="project-empty">
+          <strong>Add your first local Git repository</strong>
+          <p>Paste an accessible path below. Vantage saves the project registration; conversation history is not saved in this step.</p>
+        </div>
+
+        <nav id="project-list" class="project-list" aria-label="Saved projects"></nav>
+
+        <form id="repository-form" class="add-project">
+          <label for="repository-path">Add repository path</label>
+          <input id="repository-path" name="repository" type="text" autocomplete="off" spellcheck="false" aria-describedby="repository-help" placeholder="/Users/you/code/project" required>
+          <p id="repository-help">Nested paths and symlink aliases resolve to one canonical Git root.</p>
+          <button id="repository-submit" type="submit">Add project</button>
         </form>
-        <div id="repository-result" class="repository-result" hidden>
-          <span class="repo-dot" aria-hidden="true"></span>
-          <span id="repository-name"></span>
-        </div>
-      </section>
+      </aside>
 
-      <section id="conversation" class="panel conversation" aria-labelledby="conversation-heading" hidden>
-        <div class="section-heading">
-          <span class="step">02</span>
+      <main class="workspace">
+        <header class="workspace-header">
           <div>
-            <h2 id="conversation-heading">Ask Codex</h2>
-            <p>Continue one native conversation while Vantage remains open.</p>
+            <p class="eyebrow">Local Codex workspace</p>
+            <h1 id="workspace-title">Choose a saved project</h1>
+            <p id="workspace-path" class="workspace-path">No native process is running.</p>
           </div>
-        </div>
-        <div id="transcript" class="transcript" aria-live="polite"></div>
-        <form id="prompt-form">
-          <label for="prompt">Question</label>
-          <textarea id="prompt" name="prompt" rows="4" maxlength="32000" placeholder="What does this repository do, based on its source?" required></textarea>
-          <div class="composer-footer">
-            <span class="policy">Read-only · existing Codex defaults</span>
-            <div class="composer-actions">
-              <button id="turn-stop" class="stop" type="button" hidden>Stop</button>
-              <button id="prompt-submit" type="submit">Ask Codex</button>
+          <button id="workspace-remove" class="danger-secondary" type="button" hidden>Remove project</button>
+        </header>
+
+        <section id="workspace-empty" class="panel workspace-empty">
+          <div class="empty-mark" aria-hidden="true">⌘</div>
+          <h2>Your local workspaces, one switch away.</h2>
+          <p>Add an accessible Git repository from the sidebar. Vantage validates and saves only its canonical root and Vantage-owned metadata; it never takes ownership of repository contents.</p>
+        </section>
+
+        <section id="project-unavailable" class="panel unavailable-panel" hidden>
+          <p class="eyebrow">Project unavailable</p>
+          <h2 id="unavailable-title">The saved repository cannot be opened.</h2>
+          <p id="unavailable-detail"></p>
+          <button id="unavailable-refresh" class="secondary" type="button">Check again</button>
+        </section>
+
+        <section id="conversation" class="panel conversation" aria-labelledby="conversation-heading" hidden>
+          <div class="section-heading">
+            <span class="step">CHAT</span>
+            <div>
+              <h2 id="conversation-heading">Ask Codex</h2>
+              <p>This conversation lasts only for the current open Vantage session. Durable conversation resume arrives separately.</p>
             </div>
           </div>
-        </form>
-      </section>
+          <div id="transcript" class="transcript" aria-live="polite"></div>
+          <form id="prompt-form">
+            <label for="prompt">Question</label>
+            <textarea id="prompt" name="prompt" rows="4" maxlength="32000" placeholder="What does this repository do, based on its source?" required></textarea>
+            <div class="composer-footer">
+              <span class="policy">Read-only · existing Codex defaults</span>
+              <div class="composer-actions">
+                <button id="turn-stop" class="stop" type="button" hidden>Stop</button>
+                <button id="prompt-submit" type="submit">Ask Codex</button>
+              </div>
+            </div>
+          </form>
+        </section>
 
-      <section id="status" class="status neutral" role="status" aria-live="polite">
-        <span id="status-indicator" class="status-indicator" aria-hidden="true"></span>
+        <section id="status" class="status neutral" role="status" aria-live="polite">
+          <span id="status-indicator" class="status-indicator" aria-hidden="true"></span>
+          <div>
+            <strong id="status-title">Opening saved projects</strong>
+            <p id="status-detail">Vantage is loading its local registry.</p>
+          </div>
+          <button id="retry" class="secondary" type="button" hidden>Retry</button>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="remove-dialog" class="remove-dialog" aria-labelledby="remove-title">
+      <form method="dialog">
         <div>
-          <strong id="status-title">Choose a repository</strong>
-          <p id="status-detail">No native process is running.</p>
+          <p class="eyebrow">Confirm removal</p>
+          <h2 id="remove-title">Forget this project from Vantage?</h2>
+          <p id="remove-project-name" class="remove-project-name"></p>
+          <p>Vantage will stop its selected app-server process and forget only Vantage-owned registration and conversation metadata. The repository and Codex-owned native history remain untouched. Re-adding this path later creates a fresh Vantage project without restoring its removed Vantage conversation.</p>
         </div>
-        <button id="retry" class="secondary" type="button" hidden>Retry</button>
-      </section>
-    </main>
+        <div class="dialog-actions">
+          <button id="remove-cancel" class="secondary" value="cancel" type="button">Cancel</button>
+          <button id="remove-confirm" class="danger" value="confirm" type="button">Remove from Vantage</button>
+        </div>
+      </form>
+    </dialog>
   </body>
 </html>`;
 
@@ -99,30 +178,45 @@ body {
 
 button, input, textarea { font: inherit; }
 
-main {
+.app-shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 28px 22px 22px;
+  border-right: 1px solid #202a34;
+  background: rgba(9, 14, 19, 0.94);
+}
+
+.workspace {
   width: min(920px, calc(100% - 64px));
   margin: 0 auto;
-  padding: 54px 0 44px;
+  padding: 46px 0 44px;
 }
 
 .brand {
   display: grid;
-  grid-template-columns: 52px 1fr;
-  gap: 18px;
+  grid-template-columns: 42px 1fr;
+  gap: 12px;
   align-items: start;
-  margin-bottom: 34px;
+  margin-bottom: 30px;
 }
 
 .mark {
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
+  width: 42px;
+  height: 42px;
   border: 1px solid #6b9b88;
-  border-radius: 14px;
+  border-radius: 12px;
   background: linear-gradient(145deg, #244338, #13241f);
   color: #b9ecd7;
-  font-size: 23px;
+  font-size: 19px;
   font-weight: 700;
   box-shadow: 0 16px 45px rgba(0, 0, 0, 0.25);
 }
@@ -130,6 +224,8 @@ main {
 h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: 10px; font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.035em; }
 h2 { margin-bottom: 6px; font-size: 18px; letter-spacing: -0.01em; }
+.brand h1 { margin: 0; font-size: 22px; }
+.brand .eyebrow { margin-bottom: 4px; }
 
 .eyebrow {
   margin-bottom: 9px;
@@ -140,12 +236,129 @@ h2 { margin-bottom: 6px; font-size: 18px; letter-spacing: -0.01em; }
   text-transform: uppercase;
 }
 
-.lede, .section-heading p, .status p {
+.lede, .section-heading p, .status p, .sidebar p, .workspace-header p,
+.workspace-empty p, .unavailable-panel p, .remove-dialog p {
   color: #91a0ad;
   line-height: 1.55;
 }
 
 .lede { max-width: 660px; margin-bottom: 0; }
+
+.sidebar-heading, .workspace-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+.sidebar-heading { margin-bottom: 16px; }
+.sidebar-heading h2 { margin-bottom: 4px; font-size: 14px; }
+.sidebar-heading p { margin-bottom: 0; font-size: 11px; }
+.icon-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #2f3d47;
+  background: transparent;
+  color: #9badb8;
+}
+.project-empty {
+  margin-bottom: 14px;
+  padding: 15px;
+  border: 1px dashed #33423d;
+  border-radius: 12px;
+  background: rgba(46, 75, 63, 0.12);
+}
+.project-empty strong { display: block; margin-bottom: 6px; font-size: 13px; }
+.project-empty p { margin: 0; font-size: 11px; }
+.project-list {
+  display: grid;
+  gap: 7px;
+  min-height: 0;
+  margin-bottom: 18px;
+  overflow-y: auto;
+}
+.project-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+}
+.project-item.selected {
+  border-color: #395849;
+  background: rgba(62, 100, 82, 0.19);
+}
+.project-select {
+  min-width: 0;
+  padding: 8px;
+  background: transparent;
+  color: #dbe4e9;
+  text-align: left;
+}
+.project-select:hover:not(:disabled) { background: rgba(255, 255, 255, 0.04); }
+.project-name, .project-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-name { margin-bottom: 3px; font-size: 13px; }
+.project-path { color: #778792; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.project-state { display: block; margin-top: 5px; color: #df9c72; font-size: 10px; }
+.project-remove {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  align-self: center;
+  background: transparent;
+  color: #8e9aa3;
+}
+.project-remove:hover:not(:disabled) { background: rgba(143, 71, 66, 0.25); color: #efaaa2; }
+.add-project { margin-top: auto; padding-top: 16px; border-top: 1px solid #202a34; }
+.add-project input { margin-bottom: 7px; }
+.add-project p { margin-bottom: 10px; font-size: 10px; }
+.add-project button { width: 100%; min-height: 40px; }
+
+.workspace-header { margin-bottom: 24px; }
+.workspace-header h1 { margin-bottom: 7px; }
+.workspace-path {
+  max-width: 680px;
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.workspace-empty { padding: 54px 38px; text-align: center; }
+.workspace-empty h2 { font-size: 24px; }
+.workspace-empty p { max-width: 590px; margin: 0 auto; }
+.empty-mark { margin-bottom: 15px; color: #77ad95; font-size: 32px; }
+.unavailable-panel { border-color: #5d4432; background: rgba(57, 38, 26, 0.77); }
+.unavailable-panel .secondary { min-height: 38px; }
+.danger-secondary {
+  min-height: 38px;
+  border: 1px solid #71443f;
+  background: transparent;
+  color: #efaaa2;
+}
+.danger-secondary:hover:not(:disabled) { background: rgba(117, 68, 63, 0.22); }
+.remove-dialog {
+  width: min(470px, calc(100% - 32px));
+  padding: 0;
+  border: 1px solid #46515a;
+  border-radius: 16px;
+  background: #111820;
+  color: #edf2f7;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58);
+}
+.remove-dialog::backdrop { background: rgba(2, 5, 8, 0.72); }
+.remove-dialog form { padding: 24px; }
+.remove-project-name {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0a0f14;
+  overflow-wrap: anywhere;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
+.dialog-actions button { min-height: 40px; }
+.danger { background: #d77f76; color: #230c0a; }
+.danger:hover:not(:disabled) { background: #e8958c; }
 
 .panel, .status {
   border: 1px solid #202a34;
@@ -477,11 +690,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   50% { box-shadow: 0 0 0 7px rgba(217, 173, 97, 0); }
 }
 
-@media (max-width: 740px) {
+@media (max-width: 820px) {
   body { min-width: 0; }
-  main { width: min(100% - 28px, 920px); padding-top: 30px; }
-  .input-row { grid-template-columns: 1fr; }
-  .input-row button { min-height: 44px; }
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { min-height: auto; border-right: 0; border-bottom: 1px solid #202a34; }
+  .workspace { width: min(100% - 28px, 920px); padding-top: 30px; }
+  .project-list { max-height: 250px; }
   .status { grid-template-columns: 12px 1fr; }
   .status button { grid-column: 2; justify-self: start; min-height: 36px; }
 }`;
@@ -489,11 +703,22 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   "use strict";
 
+  const transitionProjectRemoval = (${transitionProjectRemoval.toString()});
+  const nativeBindings = globalThis.bindings;
   const repositoryForm = document.querySelector("#repository-form");
   const repositoryInput = document.querySelector("#repository-path");
   const repositorySubmit = document.querySelector("#repository-submit");
-  const repositoryResult = document.querySelector("#repository-result");
-  const repositoryName = document.querySelector("#repository-name");
+  const projectEmpty = document.querySelector("#project-empty");
+  const projectList = document.querySelector("#project-list");
+  const refreshProjects = document.querySelector("#refresh-projects");
+  const workspaceTitle = document.querySelector("#workspace-title");
+  const workspacePath = document.querySelector("#workspace-path");
+  const workspaceRemove = document.querySelector("#workspace-remove");
+  const workspaceEmpty = document.querySelector("#workspace-empty");
+  const projectUnavailable = document.querySelector("#project-unavailable");
+  const unavailableTitle = document.querySelector("#unavailable-title");
+  const unavailableDetail = document.querySelector("#unavailable-detail");
+  const unavailableRefresh = document.querySelector("#unavailable-refresh");
   const conversation = document.querySelector("#conversation");
   const promptForm = document.querySelector("#prompt-form");
   const promptInput = document.querySelector("#prompt");
@@ -504,11 +729,19 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   const statusTitle = document.querySelector("#status-title");
   const statusDetail = document.querySelector("#status-detail");
   const retry = document.querySelector("#retry");
+  const removeDialog = document.querySelector("#remove-dialog");
+  const removeProjectName = document.querySelector("#remove-project-name");
+  const removeCancel = document.querySelector("#remove-cancel");
+  const removeConfirm = document.querySelector("#remove-confirm");
 
   const assistantMessages = [];
   let activeAssistant = null;
   let sessionReady = false;
   let turnActive = false;
+  let registryBusy = false;
+  let registry = { projects: [], selectedProjectId: null };
+  let removalProjectId = null;
+  let readyRepository = null;
 
   const setStatus = (kind, title, detail, canRetry = false) => {
     status.className = "status " + kind;
@@ -518,8 +751,15 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   };
 
   const setRepositoryBusy = (busy) => {
-    repositoryInput.disabled = busy || sessionReady;
-    repositorySubmit.disabled = busy || sessionReady;
+    registryBusy = busy;
+    repositoryInput.disabled = busy || turnActive;
+    repositorySubmit.disabled = busy || turnActive;
+    refreshProjects.disabled = busy || turnActive;
+    unavailableRefresh.disabled = busy || turnActive;
+    workspaceRemove.disabled = busy;
+    removeConfirm.disabled = busy;
+    retry.disabled = busy || turnActive;
+    renderProjects();
   };
 
   const setComposerReady = (ready) => {
@@ -527,6 +767,203 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     promptSubmit.disabled = !ready;
     turnStop.hidden = ready;
     turnStop.disabled = ready;
+  };
+
+  const resetConversation = () => {
+    sessionReady = false;
+    turnActive = false;
+    readyRepository = null;
+    assistantMessages.length = 0;
+    activeAssistant = null;
+    transcript.replaceChildren();
+    conversation.hidden = true;
+    setComposerReady(false);
+    setRepositoryBusy(registryBusy);
+  };
+
+  const selectedProject = () =>
+    registry.projects.find((project) => project.id === registry.selectedProjectId) || null;
+
+  const showRemoval = (project) => {
+    if (registryBusy) return;
+    removalProjectId = project.id;
+    removeProjectName.textContent = project.canonicalRoot;
+    if (typeof removeDialog.showModal === "function") {
+      removeDialog.showModal();
+    } else {
+      removeDialog.hidden = false;
+    }
+  };
+
+  const closeRemoval = () => {
+    removalProjectId = null;
+    if (typeof removeDialog.close === "function") {
+      removeDialog.close();
+    } else {
+      removeDialog.hidden = true;
+    }
+  };
+
+  const renderProjects = () => {
+    projectList.replaceChildren();
+    projectEmpty.hidden = registry.projects.length !== 0;
+    for (const project of registry.projects) {
+      const item = document.createElement("div");
+      item.className = "project-item" + (project.selected ? " selected" : "");
+
+      const select = document.createElement("button");
+      select.className = "project-select";
+      select.type = "button";
+      select.disabled = registryBusy || turnActive;
+      select.setAttribute("aria-current", project.selected ? "page" : "false");
+      const name = document.createElement("strong");
+      name.className = "project-name";
+      name.textContent = project.name;
+      const path = document.createElement("span");
+      path.className = "project-path";
+      path.textContent = project.canonicalRoot;
+      select.append(name, path);
+      if (project.availability !== "available") {
+        const availability = document.createElement("span");
+        availability.className = "project-state";
+        availability.textContent = "Unavailable · " + project.availability.replaceAll("_", " ");
+        select.append(availability);
+      }
+      select.addEventListener("click", () => void chooseProject(project.id));
+
+      const remove = document.createElement("button");
+      remove.className = "project-remove";
+      remove.type = "button";
+      remove.title = "Remove " + project.name + " from Vantage";
+      remove.setAttribute("aria-label", remove.title);
+      remove.textContent = "×";
+      remove.disabled = registryBusy;
+      remove.addEventListener("click", () => showRemoval(project));
+      item.append(select, remove);
+      projectList.append(item);
+    }
+  };
+
+  const applyRegistry = (snapshot) => {
+    registry = snapshot;
+    renderProjects();
+    const selected = selectedProject();
+    workspaceEmpty.hidden = selected !== null;
+    workspaceRemove.hidden = selected === null;
+    if (!selected) {
+      resetConversation();
+      workspaceTitle.textContent = "Choose a saved project";
+      workspacePath.textContent = "No native process is running.";
+      projectUnavailable.hidden = true;
+      setStatus("neutral", "Add a local Git project", "The saved registry is empty. No repository or Codex history will be modified.");
+      return;
+    }
+
+    workspaceTitle.textContent = selected.name;
+    workspacePath.textContent = selected.canonicalRoot;
+    if (selected.availability !== "available") {
+      resetConversation();
+      projectUnavailable.hidden = false;
+      unavailableTitle.textContent = selected.unavailableMessage || "The saved repository is unavailable.";
+      unavailableDetail.textContent = selected.unavailableAction || "Restore the saved path or remove this project.";
+      setStatus("failed", "Project unavailable", unavailableTitle.textContent + " " + unavailableDetail.textContent);
+      return;
+    }
+
+    projectUnavailable.hidden = true;
+    if (readyRepository === selected.canonicalRoot) {
+      sessionReady = true;
+      conversation.hidden = false;
+      setComposerReady(!turnActive);
+    } else if (!turnActive) {
+      conversation.hidden = true;
+      setComposerReady(false);
+    }
+  };
+
+  const hostFailure = (result, fallback) => {
+    const error = result && result.error;
+    setStatus(
+      "failed",
+      error && error.message ? error.message : fallback,
+      error && error.action ? error.action : "Retry after checking the local prerequisite.",
+      true,
+    );
+  };
+
+  const nonSelectedRemovalFailure = (result) => {
+    const error = result && result.error;
+    const message = error && error.message
+      ? error.message
+      : "The non-selected project could not be removed.";
+    const action = error && error.action ? " " + error.action : "";
+    setStatus(
+      "running",
+      "Codex is working",
+      "The selected response is still running. " + message + action,
+    );
+  };
+
+  const chooseProject = async (projectId) => {
+    if (
+      !nativeBindings || registryBusy || turnActive ||
+      projectId === registry.selectedProjectId
+    ) return;
+    resetConversation();
+    setRepositoryBusy(true);
+    setStatus("running", "Switching project", "Stopping the prior Vantage-owned process before opening the selected workspace.");
+    try {
+      const result = await nativeBindings.selectProject(projectId);
+      if (result && result.ok) applyRegistry(result.snapshot);
+      else hostFailure(result, "The selected project could not be opened.");
+    } catch (error) {
+      hostFailure({ error }, "The selected project could not be opened.");
+    } finally {
+      setRepositoryBusy(false);
+    }
+  };
+
+  const activateCurrent = async (alreadyBusy = false) => {
+    if (
+      !nativeBindings || (!alreadyBusy && registryBusy) || turnActive ||
+      !selectedProject()
+    ) return;
+    resetConversation();
+    if (!alreadyBusy) setRepositoryBusy(true);
+    setStatus("running", "Opening selected project", "Checking its saved canonical Git root before launching Codex.");
+    try {
+      const result = await nativeBindings.activateSelectedProject();
+      if (result && result.ok) applyRegistry(result.snapshot);
+      else hostFailure(result, "The selected project could not be opened.");
+    } catch (error) {
+      hostFailure({ error }, "The selected project could not be opened.");
+    } finally {
+      if (!alreadyBusy) setRepositoryBusy(false);
+    }
+  };
+
+  const refreshRegistry = async () => {
+    if (!nativeBindings || registryBusy || turnActive) return;
+    const previous = selectedProject();
+    setRepositoryBusy(true);
+    try {
+      const result = await nativeBindings.refreshProjects();
+      if (result && result.ok) {
+        applyRegistry(result.snapshot);
+        const current = selectedProject();
+        if (
+          previous && current &&
+          previous.availability !== "available" &&
+          current.availability === "available"
+        ) {
+          await activateCurrent(true);
+        }
+      } else hostFailure(result, "Saved projects could not be checked.");
+    } catch (error) {
+      hostFailure({ error }, "Saved projects could not be checked.");
+    } finally {
+      setRepositoryBusy(false);
+    }
   };
 
   const makeMessage = (role, text) => {
@@ -584,10 +1021,9 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     switch (event.type) {
       case "repository_ready":
         sessionReady = true;
-        repositoryName.textContent = event.repository;
-        repositoryResult.hidden = false;
+        readyRepository = event.repository;
         conversation.hidden = false;
-        setRepositoryBusy(false);
+        setRepositoryBusy(registryBusy);
         setComposerReady(true);
         retry.hidden = true;
         setStatus("neutral", "Codex is ready", "Repository validated. Ask a question.");
@@ -595,6 +1031,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         break;
       case "turn_pending": {
         turnActive = true;
+        setRepositoryBusy(registryBusy);
         makeMessage("user", event.prompt);
         const assistant = makeMessage("assistant", "");
         assistantMessages.push(assistant);
@@ -623,6 +1060,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         break;
       case "turn_terminal":
         turnActive = false;
+        setRepositoryBusy(registryBusy);
         setTurnTerminal(event);
         setComposerReady(event.canContinue === true);
         if (event.status === "completed") {
@@ -636,9 +1074,10 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
         break;
       case "session_failed":
         sessionReady = false;
+        readyRepository = null;
         turnActive = false;
         setComposerReady(false);
-        setRepositoryBusy(false);
+        setRepositoryBusy(registryBusy);
         setStatus("failed", event.message, event.action, true);
         break;
     }
@@ -646,13 +1085,21 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
 
   repositoryForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!nativeBindings || registryBusy || turnActive) return;
     setRepositoryBusy(true);
-    setStatus("running", "Checking repository", "Codex will start only after Git validation succeeds.");
+    setStatus("running", "Checking repository", "Vantage will save it only after canonical Git-root validation succeeds.");
     try {
-      await bindings.startSession(repositoryInput.value);
+      const result = await nativeBindings.addProject(repositoryInput.value);
+      if (result && result.ok) {
+        repositoryInput.value = "";
+        applyRegistry(result.snapshot);
+      } else {
+        hostFailure(result, "The project could not be added.");
+      }
     } catch (error) {
+      hostFailure({ error }, "The project could not be added.");
+    } finally {
       setRepositoryBusy(false);
-      setStatus("failed", "Session could not start", nativeErrorText(error), true);
     }
   });
 
@@ -661,7 +1108,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     if (!sessionReady || turnActive) return;
     setComposerReady(false);
     try {
-      await bindings.submitPrompt(promptInput.value);
+      await nativeBindings.submitPrompt(promptInput.value);
     } catch (error) {
       setComposerReady(true);
       setStatus("failed", "Prompt was not accepted", nativeErrorText(error));
@@ -672,25 +1119,98 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     if (!turnActive || turnStop.disabled) return;
     turnStop.disabled = true;
     try {
-      await bindings.stopTurn();
+      await nativeBindings.stopTurn();
     } catch (error) {
       turnStop.disabled = false;
       setStatus("failed", "Stop was not accepted", nativeErrorText(error));
     }
   });
 
-  retry.addEventListener("click", () => {
-    sessionReady = false;
-    turnActive = false;
-    assistantMessages.length = 0;
-    activeAssistant = null;
-    transcript.replaceChildren();
-    conversation.hidden = true;
-    repositoryResult.hidden = true;
-    setComposerReady(false);
-    repositoryInput.disabled = false;
-    repositorySubmit.disabled = false;
-    repositoryInput.focus();
-    setStatus("neutral", "Try again", "Correct the prerequisite or path, then retry.");
+  refreshProjects.addEventListener("click", () => void refreshRegistry());
+  unavailableRefresh.addEventListener("click", () => void refreshRegistry());
+  workspaceRemove.addEventListener("click", () => {
+    if (registryBusy) return;
+    const selected = selectedProject();
+    if (selected) showRemoval(selected);
   });
+  removeCancel.addEventListener("click", closeRemoval);
+  removeConfirm.addEventListener("click", async () => {
+    if (!nativeBindings || registryBusy || removalProjectId === null) return;
+    const projectId = removalProjectId;
+    const removalTransition = transitionProjectRemoval(
+      projectId,
+      registry.selectedProjectId,
+      {
+        sessionReady,
+        turnActive,
+        readyRepository,
+        activeAssistant,
+        assistantMessages,
+        composerEnabled: !promptInput.disabled,
+      },
+    );
+    closeRemoval();
+    if (removalTransition.shouldResetConversation) {
+      resetConversation();
+    }
+    setRepositoryBusy(true);
+    if (removalTransition.removesSelectedProject) {
+      setStatus("running", "Removing saved project", "Stopping the selected Vantage-owned process before forgetting Vantage metadata.");
+    }
+    try {
+      const result = await nativeBindings.removeProject(projectId, true);
+      if (result && result.ok) applyRegistry(result.snapshot);
+      else if (!removalTransition.removesSelectedProject && turnActive) {
+        nonSelectedRemovalFailure(result);
+      } else {
+        hostFailure(result, "The project could not be removed.");
+      }
+    } catch (error) {
+      if (!removalTransition.removesSelectedProject && turnActive) {
+        nonSelectedRemovalFailure({ error });
+      } else {
+        hostFailure({ error }, "The project could not be removed.");
+      }
+    } finally {
+      setRepositoryBusy(false);
+    }
+  });
+
+  retry.addEventListener("click", () => {
+    const selected = selectedProject();
+    if (selected && selected.availability === "available") {
+      void activateCurrent();
+    } else {
+      void refreshRegistry();
+    }
+  });
+
+  const initialize = async () => {
+    setRepositoryBusy(true);
+    try {
+      const result = await nativeBindings.initializeApp();
+      if (!result || !result.ok) {
+        hostFailure(
+          result,
+          "Vantage could not open its saved project registry.",
+        );
+        return;
+      }
+      applyRegistry(result.snapshot);
+      if (result.snapshot.selectedProjectId !== null) {
+        await activateCurrent(true);
+      }
+    } catch (error) {
+      hostFailure(
+        { error },
+        "Vantage could not open its saved project registry.",
+      );
+    } finally {
+      setRepositoryBusy(false);
+    }
+  };
+
+  setComposerReady(false);
+  setRepositoryBusy(false);
+  if (nativeBindings) void initialize();
 })();`;
