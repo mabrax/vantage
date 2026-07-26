@@ -43,7 +43,7 @@ preferences.
 | Repository | Validated canonical Git root; unique persisted registration in Milestone 3 |
 | Conversation | One Vantage conversation per project, mapped to an exact durable native thread |
 | Live session | Disposable process/connection, distinct from durable conversation identity |
-| Turns | Sequential text turns; one unresolved/active turn at a time |
+| Turns | One live/native turn globally; one unresolved durable turn per conversation; recovered read-only history may coexist across projects |
 | Runtime policy | Fixed `approvalPolicy: never` and read-only sandbox |
 | Persistence | Strict versioned SQLite schema through one serialized module worker |
 | Native resume | `thread/resume` by persisted ID; returned ID must match; no transcript imitation |

@@ -1,3 +1,5 @@
+import { resolveCodexExecutable } from "../src/codex_client.ts";
+
 interface JsonObject {
   [key: string]: unknown;
 }
@@ -374,15 +376,6 @@ try {
       }),
     );
   }
-}
-
-function resolveCodexExecutable(): string {
-  const override = Deno.env.get("VANTAGE_CODEX_PATH");
-  if (override) return override;
-  return Deno.build.os === "darwin" &&
-      Deno.statSync("/opt/homebrew/bin/codex").isFile
-    ? "/opt/homebrew/bin/codex"
-    : "codex";
 }
 
 function asObject(value: unknown): JsonObject {

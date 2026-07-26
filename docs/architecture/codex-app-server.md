@@ -68,9 +68,12 @@ stateDiagram-v2
     Closing --> [*]: process exited
 ```
 
-Only one turn may be active. A second prompt is rejected while native acceptance is unresolved or a
-turn is running. Interruption remains pending until the native terminal state or connection failure
-is known. Uncertain input is never submitted again automatically.
+Only the selected project's live session may have one native turn active. A
+second prompt is rejected while native acceptance is unresolved or that turn is
+running. Other projects may retain recovered unresolved durable history, but
+those rows are read-only and are not live native turns. Interruption remains
+pending until the native terminal state or connection failure is known.
+Uncertain input is never submitted again automatically.
 
 For the Milestone 3 integrated path, the native thread ID is committed through
 the serialized persistence owner and outlives the live session. A new process

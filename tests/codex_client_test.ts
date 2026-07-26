@@ -143,22 +143,20 @@ Deno.test("a missing Codex executable is classified as actionable", () => {
   );
 });
 
-Deno.test("Codex resolution finds the primary macOS installation outside a GUI PATH", () => {
+Deno.test("Codex resolution uses PATH without requiring a fixed macOS installation", async () => {
   const originalPath = Deno.env.get("PATH");
+  const directory = await Deno.makeTempDir({
+    prefix: "vantage-codex-resolution-",
+  });
+  const executable = `${directory}/codex`;
   try {
-    Deno.env.set("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
-    const executable = resolveCodexExecutable();
-    if (
-      Deno.build.os === "darwin" &&
-      Deno.statSync("/opt/homebrew/bin/codex").isFile
-    ) {
-      assert.equal(executable, "/opt/homebrew/bin/codex");
-    } else {
-      assert.equal(executable, "codex");
-    }
+    await Deno.writeTextFile(executable, "#!/bin/sh\nexit 0\n");
+    Deno.env.set("PATH", directory);
+    assert.equal(resolveCodexExecutable(), executable);
   } finally {
     if (originalPath === undefined) Deno.env.delete("PATH");
     else Deno.env.set("PATH", originalPath);
+    await Deno.remove(directory, { recursive: true });
   }
 });
 

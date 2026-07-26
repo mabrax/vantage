@@ -11,7 +11,10 @@ certification, or reliability platform.
 1. The canonical selected Git repository is the working directory for every turn in the session.
 2. At most one app-server process and one native thread are live even when
    several durable conversations are registered.
-3. At most one turn is unresolved or active.
+3. At most one live/native turn exists globally because only the selected
+   project owns a live process. Each durable conversation has at most one
+   unresolved turn; multiple projects may retain recovered unresolved,
+   read-only history concurrently.
 4. Assistant text and terminal state are shown in native order.
 5. Interruption, failure, and completion remain distinct visible outcomes.
 6. Uncertain input is never submitted again automatically.

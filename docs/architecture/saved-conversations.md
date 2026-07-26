@@ -210,9 +210,12 @@ stateDiagram-v2
     Streaming --> Failed: native terminal
 ```
 
-Only one `pending`, `accepted`, or `streaming` turn may exist in a conversation.
-A pending row is created before native dispatch. Native acceptance transitions
-that exact scoped row; deltas and terminal events require the same
+Only one `pending`, `accepted`, or `streaming` turn may exist in each
+conversation. This is a per-conversation durability invariant, not a global
+database limit: multiple projects may retain recovered unresolved rows as
+read-only history. Only the selected project may own the single live/native turn
+globally. A pending row is created before native dispatch. Native acceptance
+transitions that exact scoped row; deltas and terminal events require the same
 project/conversation/turn identities. Terminal status is never inferred from
 text, process exit, elapsed time, or a saved transcript.
 

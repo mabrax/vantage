@@ -506,6 +506,71 @@ Deno.test("session-loss reconciliation preserves every native phase without repl
   });
 });
 
+Deno.test("recovered unresolved history may coexist across projects but not within one conversation", async () => {
+  await withDatabase(async (path) => {
+    const owner = await PersistenceOwner.open(path);
+    const first = projectInput("recovered-a");
+    const second = projectInput("recovered-b");
+    await owner.createProjectWithConversation(first);
+    await owner.createProjectWithConversation(second);
+
+    await owner.beginTurn({
+      projectId: first.projectId,
+      conversationId: first.conversationId,
+      turnId: "turn-recovered-a",
+      ordinal: 0,
+      prompt: "uncertain first prompt",
+      createdAt: 1,
+    });
+    await owner.reconcileAfterSessionLoss({
+      projectId: first.projectId,
+      conversationId: first.conversationId,
+      reason: "crash",
+    });
+
+    await owner.beginTurn({
+      projectId: second.projectId,
+      conversationId: second.conversationId,
+      turnId: "turn-recovered-b",
+      ordinal: 0,
+      prompt: "uncertain second prompt",
+      createdAt: 2,
+    });
+    await owner.reconcileAfterSessionLoss({
+      projectId: second.projectId,
+      conversationId: second.conversationId,
+      reason: "clean_close",
+    });
+
+    const firstSnapshot = await owner.readConversation(first);
+    const secondSnapshot = await owner.readConversation(second);
+    assert.equal(
+      firstSnapshot?.turns[0].recoveryDisposition,
+      "uncertain_acceptance",
+    );
+    assert.equal(
+      secondSnapshot?.turns[0].recoveryDisposition,
+      "uncertain_acceptance",
+    );
+    await assert.rejects(
+      () =>
+        owner.beginTurn({
+          projectId: first.projectId,
+          conversationId: first.conversationId,
+          turnId: "turn-recovered-a-duplicate",
+          ordinal: 1,
+          prompt: "must not coexist in the same conversation",
+          createdAt: 3,
+        }),
+      (error) =>
+        error instanceof StorageError &&
+        error.code === "storage_state" &&
+        /already has an unresolved turn/i.test(error.message),
+    );
+    await owner.close();
+  });
+});
+
 Deno.test("removal forgets only Vantage state and re-add is fresh", async () => {
   await withDatabase(async (path) => {
     const owner = await PersistenceOwner.open(path);
