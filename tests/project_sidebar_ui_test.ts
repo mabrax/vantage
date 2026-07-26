@@ -18,7 +18,7 @@ Deno.test("saved-project sidebar exposes the complete empty, unavailable, select
     assert.match(HTML, new RegExp(`id="${id}"`));
   }
   assert.match(HTML, /Add your first local Git repository/);
-  assert.match(HTML, /conversation history is not saved in this step/i);
+  assert.match(HTML, /one durable native Codex conversation/i);
   assert.match(
     HTML,
     /Re-adding this path later creates a fresh Vantage project/i,
@@ -41,7 +41,10 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
     JAVASCRIPT,
     /nativeBindings\.addProject\(repositoryInput\.value\)/,
   );
-  assert.match(JAVASCRIPT, /nativeBindings\.selectProject\(projectId\)/);
+  assert.match(
+    JAVASCRIPT,
+    /nativeBindings\.selectProject\(projectId, confirmed\)/,
+  );
   assert.match(JAVASCRIPT, /nativeBindings\.removeProject\(projectId, true\)/);
   assert.match(JAVASCRIPT, /typeof removeDialog\.showModal === "function"/);
   assert.match(
@@ -52,6 +55,17 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
   assert.equal(JAVASCRIPT.includes("outerHTML"), false);
 });
 
+Deno.test("read-only and idle composer states do not expose a meaningless Stop action", () => {
+  assert.match(
+    JAVASCRIPT,
+    /turnStop\.hidden = ready \|\| !turnActive/,
+  );
+  assert.match(
+    JAVASCRIPT,
+    /turnStop\.disabled = ready \|\| !turnActive/,
+  );
+});
+
 Deno.test("registry busy state guards and disables every competing project mutation without blocking active-turn removal", () => {
   assert.match(JAVASCRIPT, /let registryBusy = false/);
   assert.match(
@@ -60,7 +74,7 @@ Deno.test("registry busy state guards and disables every competing project mutat
   );
   assert.match(
     JAVASCRIPT,
-    /select\.disabled = registryBusy \|\| turnActive/,
+    /select\.disabled = registryBusy/,
   );
   assert.match(JAVASCRIPT, /remove\.disabled = registryBusy/);
   assert.match(JAVASCRIPT, /workspaceRemove\.disabled = busy/);

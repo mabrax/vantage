@@ -1,8 +1,12 @@
 import { VantageError } from "./errors.ts";
 import { PersistenceOwner } from "./persistence.ts";
 import type {
+  ConversationSnapshot,
+  NativeResumeFailure,
+  NativeResumeState,
   ProjectRegistrySnapshot as StoredRegistrySnapshot,
   RegisteredProjectRecord,
+  TurnPhase,
 } from "./persistence_protocol.ts";
 import { validateRepository } from "./repository.ts";
 import { SessionController } from "./session_controller.ts";
@@ -28,6 +32,27 @@ export interface ProjectView {
 export interface ProjectRegistryView {
   readonly projects: readonly ProjectView[];
   readonly selectedProjectId: string | null;
+  readonly conversation: ConversationView | null;
+}
+
+export interface ConversationTurnView {
+  readonly id: string;
+  readonly prompt: string;
+  readonly assistantSource: string;
+  readonly phase: TurnPhase;
+  readonly terminalLabel: string;
+  readonly recoveryLabel: string | null;
+}
+
+export interface ConversationView {
+  readonly projectId: string;
+  readonly conversationId: string;
+  readonly nativeThreadId: string | null;
+  readonly nativeResumeState: NativeResumeState;
+  readonly nativeResumeFailure: NativeResumeFailure | null;
+  readonly readOnly: boolean;
+  readonly composerAvailable: boolean;
+  readonly turns: readonly ConversationTurnView[];
 }
 
 export interface AvailabilityResult {
@@ -54,7 +79,9 @@ export class ProjectRegistryController {
   #view: ProjectRegistryView = {
     projects: [],
     selectedProjectId: null,
+    conversation: null,
   };
+  #selectedConversation: ConversationSnapshot | null = null;
   #registryBusy = false;
   #closed = false;
 
@@ -68,10 +95,33 @@ export class ProjectRegistryController {
       inspectRegisteredRepository,
     readonly createId: () => string = () => crypto.randomUUID(),
     readonly now: () => number = () => Date.now(),
-  ) {}
+  ) {
+    this.session.attachPersistence(persistence);
+  }
 
   async initialize(): Promise<ProjectRegistryView> {
     return await this.#runRegistryMutation(async () => {
+      await this.#reload();
+      for (const entry of this.#stored.projects) {
+        const conversation = await this.persistence.readConversation({
+          projectId: entry.project.id,
+          conversationId: entry.conversation.id,
+        });
+        if (
+          conversation?.turns.some((turn) =>
+            (turn.phase === "pending" ||
+              turn.phase === "accepted" ||
+              turn.phase === "streaming") &&
+            turn.recoveryDisposition === null
+          )
+        ) {
+          await this.persistence.reconcileAfterSessionLoss({
+            projectId: entry.project.id,
+            conversationId: entry.conversation.id,
+            reason: "crash",
+          });
+        }
+      }
       await this.#reload();
       if (
         this.#stored.projects.length > 0 &&
@@ -89,11 +139,18 @@ export class ProjectRegistryController {
     return {
       projects: this.#view.projects.map((project) => ({ ...project })),
       selectedProjectId: this.#view.selectedProjectId,
+      conversation: this.#view.conversation
+        ? {
+          ...this.#view.conversation,
+          turns: this.#view.conversation.turns.map((turn) => ({ ...turn })),
+        }
+        : null,
     };
   }
 
   async activateSelectedProject(): Promise<ProjectRegistryView> {
     return await this.#runRegistryMutation(async () => {
+      await this.#reload();
       const selected = this.#selectedView();
       if (!selected) {
         await this.session.clearSession();
@@ -103,10 +160,8 @@ export class ProjectRegistryController {
         await this.session.clearSession();
         return this.snapshot();
       }
-      await this.session.startSession(
-        selected.canonicalRoot,
-        selected.canonicalRoot,
-      );
+      await this.#startSelectedSession();
+      await this.#reload();
       return this.snapshot();
     });
   }
@@ -141,20 +196,28 @@ export class ProjectRegistryController {
       });
       await this.persistence.setSelectedProject(projectId, createdAt);
       await this.#reload();
-      await this.session.startSession(canonicalRoot, canonicalRoot);
+      await this.#startSelectedSession();
+      await this.#reload();
       return this.snapshot();
     });
   }
 
-  async selectProject(projectId: unknown): Promise<ProjectRegistryView> {
+  async selectProject(
+    projectId: unknown,
+    confirmedActiveSwitch = false,
+  ): Promise<ProjectRegistryView> {
     return await this.#runRegistryMutation(async () => {
-      this.#assertSessionReplaceable();
       const project = this.#requireProject(projectId);
       if (project.project.id === this.#stored.selectedProjectId) {
         return this.snapshot();
       }
 
-      await this.session.clearSession();
+      if (this.session.hasActiveTurn()) {
+        await this.session.prepareForProjectSwitch(confirmedActiveSwitch);
+      } else {
+        this.#assertSessionReplaceable();
+        await this.session.clearSession();
+      }
       await this.persistence.setSelectedProject(
         project.project.id,
         this.now(),
@@ -162,10 +225,8 @@ export class ProjectRegistryController {
       await this.#reload();
       const selected = this.#selectedView();
       if (selected?.availability === "available") {
-        await this.session.startSession(
-          selected.canonicalRoot,
-          selected.canonicalRoot,
-        );
+        await this.#startSelectedSession();
+        await this.#reload();
       } else {
         await this.session.clearSession();
       }
@@ -202,7 +263,11 @@ export class ProjectRegistryController {
       const project = this.#requireProject(projectId);
       const isSelected = project.project.id === this.#stored.selectedProjectId;
       if (isSelected) {
-        await this.session.reapSession();
+        if (this.session.hasActiveTurn()) {
+          await this.session.prepareForProjectSwitch(true);
+        } else {
+          await this.session.reapSession();
+        }
       }
 
       const remaining = this.#stored.projects.filter((entry) =>
@@ -221,10 +286,8 @@ export class ProjectRegistryController {
       if (isSelected) {
         const selected = this.#selectedView();
         if (selected?.availability === "available") {
-          await this.session.startSession(
-            selected.canonicalRoot,
-            selected.canonicalRoot,
-          );
+          await this.#startSelectedSession();
+          await this.#reload();
         }
       }
       return this.snapshot();
@@ -234,12 +297,32 @@ export class ProjectRegistryController {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    await this.session.close();
-    await this.persistence.close();
+    let failure: unknown = null;
+    try {
+      await this.session.close();
+    } catch (error) {
+      failure = error;
+    } finally {
+      try {
+        await this.persistence.close();
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure) throw failure;
   }
 
   async #reload(): Promise<void> {
     this.#stored = await this.persistence.readProjectRegistry();
+    const selectedStored = this.#stored.projects.find((entry) =>
+      entry.project.id === this.#stored.selectedProjectId
+    );
+    this.#selectedConversation = selectedStored
+      ? await this.persistence.readConversation({
+        projectId: selectedStored.project.id,
+        conversationId: selectedStored.conversation.id,
+      })
+      : null;
     const availability = await Promise.all(
       this.#stored.projects.map((entry) =>
         this.availabilityInspector(entry.project.canonicalRoot)
@@ -254,6 +337,9 @@ export class ProjectRegistryController {
         )
       ),
       selectedProjectId: this.#stored.selectedProjectId,
+      conversation: this.#selectedConversation
+        ? conversationView(this.#selectedConversation)
+        : null,
     };
   }
 
@@ -292,6 +378,33 @@ export class ProjectRegistryController {
     }
   }
 
+  async #startSelectedSession(): Promise<void> {
+    const selected = this.#selectedView();
+    const stored = this.#stored.projects.find((entry) =>
+      entry.project.id === this.#stored.selectedProjectId
+    );
+    if (!selected || !stored || !this.#selectedConversation) return;
+    const readOnly = this.#selectedConversation.turns.some((turn) =>
+      turn.recoveryDisposition !== null
+    );
+    if (readOnly) {
+      await this.session.clearSession();
+      return;
+    }
+    await this.session.startSession(
+      selected.canonicalRoot,
+      selected.canonicalRoot,
+      {
+        projectId: stored.project.id,
+        conversationId: stored.conversation.id,
+        nativeThreadId: stored.conversation.nativeThreadId,
+        nativeResumeState: stored.conversation.nativeResumeState,
+        nextOrdinal: this.#selectedConversation.turns.length,
+        readOnly,
+      },
+    );
+  }
+
   async #runRegistryMutation<T>(operation: () => Promise<T>): Promise<T> {
     this.#assertOpen();
     if (this.#registryBusy) {
@@ -318,6 +431,55 @@ export class ProjectRegistryController {
       );
     }
   }
+}
+
+function conversationView(
+  snapshot: ConversationSnapshot,
+): ConversationView {
+  const recovered = snapshot.turns.some((turn) =>
+    turn.recoveryDisposition !== null
+  );
+  const readOnly = recovered ||
+    snapshot.conversation.nativeResumeState === "non_resumable";
+  return {
+    projectId: snapshot.project.id,
+    conversationId: snapshot.conversation.id,
+    nativeThreadId: snapshot.conversation.nativeThreadId,
+    nativeResumeState: snapshot.conversation.nativeResumeState,
+    nativeResumeFailure: snapshot.conversation.nativeResumeFailure,
+    readOnly,
+    composerAvailable: !readOnly,
+    turns: snapshot.turns.map((turn) => ({
+      id: turn.id,
+      prompt: turn.prompt,
+      assistantSource: turn.assistantSource,
+      phase: turn.phase,
+      terminalLabel: terminalLabel(turn.phase),
+      recoveryLabel: recoveryLabel(turn.recoveryDisposition),
+    })),
+  };
+}
+
+function terminalLabel(phase: TurnPhase): string {
+  if (phase === "completed") return "Completed";
+  if (phase === "interrupted") return "Interrupted";
+  if (phase === "failed") return "Failed";
+  return "Unresolved";
+}
+
+function recoveryLabel(
+  disposition: ConversationSnapshot["turns"][number]["recoveryDisposition"],
+): string | null {
+  if (disposition === "uncertain_acceptance") {
+    return "Prompt acceptance is uncertain. It was not replayed.";
+  }
+  if (disposition === "incomplete_accepted") {
+    return "Codex accepted this turn, but no terminal outcome was proven.";
+  }
+  if (disposition === "incomplete_stream") {
+    return "This response is incomplete. Saved source is shown exactly.";
+  }
+  return null;
 }
 
 export async function inspectRegisteredRepository(

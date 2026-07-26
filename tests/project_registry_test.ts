@@ -10,6 +10,8 @@ import {
 } from "../src/project_registry.ts";
 import { SessionController } from "../src/session_controller.ts";
 
+let nativeTurnSequence = 0;
+
 class FakeCodex implements CodexSession {
   readonly prompts: string[] = [];
   shutdowns = 0;
@@ -18,18 +20,27 @@ class FakeCodex implements CodexSession {
 
   constructor(readonly repository: string, readonly log: string[]) {}
 
-  async initialize(): Promise<void> {
+  async initialize(request?: { nativeThreadId?: string }) {
     this.log.push(`initialize:${this.repository}`);
     await this.initializeGate;
+    return {
+      threadId: request?.nativeThreadId ?? null,
+      resumed: request?.nativeThreadId !== undefined,
+    };
+  }
+
+  startDurableThread(): Promise<string> {
+    this.log.push(`start-thread:${this.repository}`);
+    return Promise.resolve(`thread:${this.repository}`);
   }
 
   startTurn(
     prompt: string,
     onEvent: (event: NativeTurnEvent) => void,
-  ): Promise<void> {
+  ): Promise<string> {
     this.prompts.push(prompt);
     this.onTurnEvent = onEvent;
-    return Promise.resolve();
+    return Promise.resolve(`turn-${++nativeTurnSequence}`);
   }
 
   interruptTurn(): Promise<void> {
@@ -115,7 +126,7 @@ async function gitStatus(root: string): Promise<string> {
 async function waitFor(predicate: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt++) {
     if (predicate()) return;
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   assert.fail("Timed out waiting for the deferred registry operation.");
 }
@@ -290,7 +301,7 @@ Deno.test("removal requires confirmation, reaps only the selected process, and n
       status: "completed",
       canContinue: true,
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => harness.session.snapshot().phase === "completed");
     assert.deepEqual(
       harness.events.slice(-2),
       [
@@ -329,6 +340,7 @@ Deno.test("removal requires confirmation, reaps only the selected process, and n
     assert.deepEqual(harness.registry.snapshot(), {
       projects: [],
       selectedProjectId: null,
+      conversation: null,
     });
     assert.deepEqual(
       await Deno.readFile(`${first}/sentinel.txt`),
@@ -378,7 +390,7 @@ Deno.test("no-longer-Git roots are actionable and selection is blocked during an
     await harness.session.submitPrompt("active");
     await assert.rejects(
       () => harness.registry.selectProject("project-first"),
-      /only while Codex is idle/,
+      /still working in the current project/,
     );
     assert.equal(
       harness.registry.snapshot().selectedProjectId,

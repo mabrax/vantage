@@ -7,6 +7,12 @@ export type VantageErrorCode =
   | "project_duplicate"
   | "project_missing"
   | "removal_confirmation"
+  | "switch_confirmation"
+  | "conversation_read_only"
+  | "native_missing"
+  | "native_incompatible"
+  | "native_resume_failed"
+  | "storage_owner"
   | "closed"
   | "invalid_command";
 

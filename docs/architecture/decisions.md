@@ -155,8 +155,8 @@ history and repositories remain external. Exact schema, migration,
 reconciliation, corruption, removal, and re-add semantics live in
 [saved projects and conversations](saved-conversations.md).
 
-This decision does not activate the issue #26 sidebar or issue #27
-relaunch/switching UI.
+Issues #26 and #27 subsequently activate this storage boundary in the saved
+project sidebar and durable conversation lifecycle.
 
 ## D-011 — Resume exact native identity; never imitate continuity with transcript replay
 
@@ -174,3 +174,24 @@ Saved source can remain visible as read-only history when native continuity is
 unavailable, but it must be labeled non-resumable. Uncertain prompts are never
 replayed; incomplete source never becomes completed because a process ended.
 This conservative boundary preserves native ownership and terminal truth.
+
+## Behavioral checks attached to issue #27
+
+The durable project-conversation integration includes focused checks for:
+
+- fresh add and re-add remaining `unstarted` with no native mapping or turns
+  until the first literal prompt;
+- first-prompt ordering that creates one non-ephemeral native thread, commits
+  its exact mapping, records the pending prompt, and only then dispatches;
+- separate project conversations, idle and confirmed active switching, exact
+  process reap-before-start ordering, and rejection of late source or terminal
+  events;
+- relaunch restoration of literal prompts, ordered raw assistant source, native
+  terminal labels, selected project, and safe rich-response re-rendering;
+- exact native resume, explicit missing/incompatible/failed resume, read-only
+  recovered history, and retry without replacement-thread impersonation;
+- conservative pending, accepted, streaming, process-loss, and terminal crash
+  states without uncertain replay or false completion; and
+- injected failures at mapping, pending, acceptance, source append, terminal
+  commit, reconciliation, close, and reap boundaries, with exact owned-process
+  cleanup in `finally`.

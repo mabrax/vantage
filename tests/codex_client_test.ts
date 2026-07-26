@@ -21,6 +21,9 @@ class FakeAppServer implements ManagedChild {
   readonly requests: Request[] = [];
   readonly killSignals: Deno.Signal[] = [];
   deferTurnStarted = false;
+  resumeError: string | null = null;
+  resumeThreadIdOverride: string | null = null;
+  resumeCwd = "/repo";
   readonly #encoder = new TextEncoder();
   readonly #decoder = new TextDecoder();
   readonly #status = Promise.withResolvers<Deno.CommandStatus>();
@@ -102,6 +105,21 @@ class FakeAppServer implements ManagedChild {
         thread: { id: "thread-1" },
         cwd: "/repo",
       });
+    } else if (message.method === "thread/resume") {
+      if (this.resumeError) {
+        this.#send({
+          id: message.id,
+          error: { code: -32000, message: this.resumeError },
+        });
+      } else {
+        this.#respond(message.id, {
+          thread: {
+            id: this.resumeThreadIdOverride ??
+              String(message.params.threadId),
+          },
+          cwd: this.resumeCwd,
+        });
+      }
     } else if (message.method === "turn/start") {
       const turnId = `turn-${++this.#turn}`;
       this.#respond(message.id, { turn: { id: turnId } });
@@ -164,6 +182,7 @@ Deno.test("native follow-ups reuse one thread and interruption waits for termina
   const process = new FakeAppServer();
   const session = new AppServerCodexSession("/repo", () => process);
   await session.initialize();
+  await session.startDurableThread();
 
   const first: string[] = [];
   await session.startTurn("Remember amber", (event) => {
@@ -207,4 +226,88 @@ Deno.test("native follow-ups reuse one thread and interruption waits for termina
 
   await session.shutdown();
   assert.deepEqual(process.killSignals, ["SIGTERM"]);
+});
+
+Deno.test("unstarted initialization creates no thread while first submit seam is durable and exact resume uses only the saved ID", async () => {
+  const firstProcess = new FakeAppServer();
+  const first = new AppServerCodexSession("/repo", () => firstProcess);
+  const initialized = await first.initialize();
+  assert.deepEqual(initialized, { threadId: null, resumed: false });
+  assert.equal(
+    firstProcess.requests.some((request) =>
+      request.method === "thread/start" || request.method === "thread/resume"
+    ),
+    false,
+  );
+
+  assert.equal(await first.startDurableThread(), "thread-1");
+  const start = firstProcess.requests.find((request) =>
+    request.method === "thread/start"
+  );
+  assert.equal(start?.params.ephemeral, false);
+  assert.equal(start?.params.approvalPolicy, "never");
+  assert.equal(start?.params.sandbox, "read-only");
+  await first.shutdown();
+
+  const secondProcess = new FakeAppServer();
+  const second = new AppServerCodexSession("/repo", () => secondProcess);
+  assert.deepEqual(
+    await second.initialize({ nativeThreadId: "thread-1" }),
+    { threadId: "thread-1", resumed: true },
+  );
+  assert.equal(
+    secondProcess.requests.some((request) => request.method === "thread/start"),
+    false,
+  );
+  const resume = secondProcess.requests.find((request) =>
+    request.method === "thread/resume"
+  );
+  assert.deepEqual(resume?.params, {
+    threadId: "thread-1",
+    cwd: "/repo",
+    approvalPolicy: "never",
+    sandbox: "read-only",
+  });
+  await second.shutdown();
+});
+
+Deno.test("missing native history fails explicitly without creating a replacement thread", async () => {
+  const process = new FakeAppServer();
+  process.resumeError = "thread not found";
+  const session = new AppServerCodexSession("/repo", () => process);
+  await assert.rejects(
+    () => session.initialize({ nativeThreadId: "missing-thread" }),
+    (error) =>
+      error instanceof VantageError &&
+      error.code === "native_missing" &&
+      /read-only/i.test(error.action),
+  );
+  assert.equal(
+    process.requests.some((request) => request.method === "thread/start"),
+    false,
+  );
+  await session.shutdown();
+});
+
+Deno.test("changed native identity and incompatible repository history stay explicit and non-resumable", async () => {
+  for (const mismatch of ["identity", "cwd"] as const) {
+    const process = new FakeAppServer();
+    if (mismatch === "identity") {
+      process.resumeThreadIdOverride = "different-thread";
+    } else {
+      process.resumeCwd = "/different-repository";
+    }
+    const session = new AppServerCodexSession("/repo", () => process);
+    await assert.rejects(
+      () => session.initialize({ nativeThreadId: "thread-1" }),
+      (error) =>
+        error instanceof VantageError &&
+        error.code === "native_incompatible",
+    );
+    assert.equal(
+      process.requests.some((request) => request.method === "thread/start"),
+      false,
+    );
+    await session.shutdown();
+  }
 });

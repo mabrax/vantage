@@ -1,14 +1,15 @@
 # Saved projects and conversations
 
-Status: **Accepted foundation for Milestone 3 issue #25**
+Status: **Accepted and implemented through Milestone 3 issue #27**
 
 The [Milestone 3 map](../milestones/03-saved-projects-and-conversations.md) owns
 the wider product boundary and sequencing. This document owns the persistence,
 native-resume, lifecycle, reconciliation, corruption, removal, and re-add
 contract consumed by issues #26 and #27.
 
-Issue #25 establishes the contract and storage implementation; it does not add
-the project sidebar or connect saved state to the current session-only UI.
+Issue #25 establishes the storage and native-resume foundation. Issues #26 and
+#27 connect it to the saved-project sidebar and one durable conversation per
+project.
 
 ## Decision
 

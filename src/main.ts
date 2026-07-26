@@ -112,9 +112,12 @@ window.bind("addProject", async (path: unknown) => {
     savedProjects.addProject(path)
   );
 });
-window.bind("selectProject", async (projectId: unknown) => {
+window.bind("selectProject", async (
+  projectId: unknown,
+  confirmedActiveSwitch: unknown,
+) => {
   return await registryCommand((savedProjects) =>
-    savedProjects.selectProject(projectId)
+    savedProjects.selectProject(projectId, confirmedActiveSwitch === true)
   );
 });
 window.bind("refreshProjects", async () => {
@@ -145,12 +148,15 @@ window.addEventListener("close", (event) => {
   event.preventDefault();
   closing = true;
   void (async () => {
-    if (registry) {
-      await registry.close();
-    } else {
-      await controller.close();
+    try {
+      if (registry) {
+        await registry.close();
+      } else {
+        await controller.close();
+      }
+    } finally {
+      window.close();
     }
-    window.close();
   })();
 });
 

@@ -1,6 +1,6 @@
 # Architecture overview
 
-Status: **Accepted through the Milestone 3 saved-conversation foundation**
+Status: **Accepted and implemented through Milestone 3 issue #27**
 
 This set owns Vantage's implementation contracts. Milestone maps own delivery
 scope and sequencing:
@@ -11,12 +11,11 @@ scope and sequencing:
 - [Milestone 3](../milestones/03-saved-projects-and-conversations.md) promotes
   saved projects and exact native conversation resume.
 
-Issue #26 consumes the saved-project half of the accepted
+Issues #26 and #27 implement the accepted
 [saved-project/conversation contract](saved-conversations.md): the UI persists
-canonical project registrations, order, selection, availability, and explicit
-removal in its sidebar. The selected chat remains session-only until issue #27
-adds durable transcript projection, exact native resume, and relaunch
-conversation continuation.
+canonical project registrations, order, selection, availability, explicit
+removal, one raw-source conversation projection per project, exact native
+resume, isolated switching, and relaunch continuation.
 
 ## Architectural outcome
 
