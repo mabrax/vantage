@@ -1,5 +1,22 @@
 // deno-lint-ignore-file no-explicit-any
 
+import {
+  decodeXmlText,
+  findXmlTagEnd,
+  MERMAID_SOURCE_LIMIT,
+  mermaidNodeToken,
+  parseMermaid,
+  parseXmlAttributes,
+  safeSvgAlternative,
+  safeSvgColor,
+  safeSvgNumber,
+  safeSvgNumberList,
+  safeSvgTransform,
+  sanitizeSvg,
+  sanitizeSvgAttributes,
+  SVG_SOURCE_LIMIT,
+} from "./visuals.ts";
+
 export type InlineNode =
   | { readonly type: "text"; readonly value: string }
   | { readonly type: "code"; readonly value: string }
@@ -48,6 +65,11 @@ export type BlockNode =
     readonly language: string;
     readonly value: string;
     readonly complete: boolean;
+  }
+  | {
+    readonly type: "visual_block";
+    readonly format: "mermaid" | "svg";
+    readonly value: string;
   };
 
 interface SourceLine {
@@ -380,12 +402,23 @@ export function parseMarkdown(
       const contentEnd = closeIndex >= 0
         ? lines[closeIndex].start
         : source.length;
-      blocks.push({
-        type: "code_block",
-        language,
-        value: source.slice(contentStart, contentEnd),
-        complete: closeIndex >= 0,
-      });
+      const value = source.slice(contentStart, contentEnd);
+      const visualFormat = language.toLowerCase();
+      blocks.push(
+        closeIndex >= 0 &&
+          (visualFormat === "mermaid" || visualFormat === "svg")
+          ? {
+            type: "visual_block",
+            format: visualFormat,
+            value,
+          }
+          : {
+            type: "code_block",
+            language,
+            value,
+            complete: closeIndex >= 0,
+          },
+      );
       index = closeIndex >= 0 ? closeIndex + 1 : lines.length;
       continue;
     }
@@ -498,6 +531,7 @@ export function parseMarkdown(
 function markdownRuntime(): void {
   const browser = globalThis as any;
   const document = browser.document;
+  const svgNamespace = "http://www.w3.org/2000/svg";
   const inline = (parent: any, nodes: readonly InlineNode[]) => {
     for (const node of nodes) {
       if (node.type === "text") {
@@ -549,6 +583,268 @@ function markdownRuntime(): void {
     const copied = document.execCommand("copy");
     textarea.remove();
     if (!copied) throw new Error("Clipboard access is unavailable.");
+  };
+
+  const copyButton = (value: string, label: string, text = "Copy source") => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-code";
+    button.textContent = text;
+    button.setAttribute("aria-label", `Copy ${label} source`);
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await copyText(value);
+        button.textContent = "Copied";
+      } catch {
+        button.textContent = "Copy failed";
+      } finally {
+        browser.setTimeout(() => {
+          button.textContent = text;
+          button.disabled = false;
+        }, 1600);
+      }
+    });
+    return button;
+  };
+
+  const appendExactSource = (
+    parent: any,
+    value: string,
+    label: string,
+    open: boolean,
+  ) => {
+    const details = document.createElement("details");
+    details.className = "visual-source";
+    details.open = open;
+    const summary = document.createElement("summary");
+    summary.textContent = "Source";
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.dataset.language = label.toLowerCase();
+    code.textContent = value;
+    pre.append(code);
+    details.append(summary, pre);
+    parent.append(details);
+  };
+
+  const visualFallback = (parent: any, node: any, error: string) => {
+    const figure = document.createElement("figure");
+    figure.className = "code-block visual-fallback";
+    const caption = document.createElement("figcaption");
+    const language = document.createElement("span");
+    language.className = "code-language";
+    language.textContent = node.format === "mermaid" ? "Mermaid" : "SVG";
+    caption.append(language, copyButton(node.value, language.textContent));
+    const message = document.createElement("p");
+    message.className = "visual-error";
+    message.setAttribute("role", "status");
+    message.textContent = error;
+    figure.append(caption, message);
+    appendExactSource(figure, node.value, language.textContent, true);
+    parent.append(figure);
+  };
+
+  const svgElement = (name: string) =>
+    document.createElementNS(svgNamespace, name);
+
+  const mermaidVisual = (parent: any, node: any): string | null => {
+    const result = parseMermaid(node.value);
+    if (!result.ok) return result.error;
+    const diagram = result.value;
+    const figure = document.createElement("figure");
+    figure.className = "visual-block mermaid-block";
+    const caption = document.createElement("figcaption");
+    const label = document.createElement("span");
+    label.className = "visual-label";
+    label.textContent = "Mermaid diagram";
+    caption.append(label, copyButton(node.value, "Mermaid"));
+
+    const viewport = document.createElement("div");
+    viewport.className = "visual-viewport";
+    const svg = svgElement("svg");
+    svg.classList.add("diagram-svg");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", diagram.alternative);
+
+    const count = diagram.nodes.length;
+    const columns = Math.min(
+      diagram.direction === "LR" || diagram.direction === "RL" ? 4 : 3,
+      Math.max(1, Math.ceil(Math.sqrt(count))),
+    );
+    const rows = Math.ceil(count / columns);
+    const nodeWidth = 180;
+    const nodeHeight = 64;
+    const gapX = 70;
+    const gapY = 70;
+    const padding = 28;
+    const width = padding * 2 + columns * nodeWidth +
+      Math.max(0, columns - 1) * gapX;
+    const height = padding * 2 + rows * nodeHeight +
+      Math.max(0, rows - 1) * gapY;
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    const positions = new Map();
+    diagram.nodes.forEach((item: any, index: number) => {
+      const logicalColumn = index % columns;
+      const logicalRow = Math.floor(index / columns);
+      const column = diagram.direction === "RL"
+        ? columns - logicalColumn - 1
+        : logicalColumn;
+      const row = diagram.direction === "BT"
+        ? rows - logicalRow - 1
+        : logicalRow;
+      positions.set(item.id, {
+        x: padding + column * (nodeWidth + gapX),
+        y: padding + row * (nodeHeight + gapY),
+      });
+    });
+
+    for (const edge of diagram.edges) {
+      const from = positions.get(edge.from);
+      const to = positions.get(edge.to);
+      const startX = from.x + nodeWidth / 2;
+      const startY = from.y + nodeHeight / 2;
+      const endX = to.x + nodeWidth / 2;
+      const endY = to.y + nodeHeight / 2;
+      const dx = endX - startX;
+      const dy = endY - startY;
+      const length = Math.max(1, Math.hypot(dx, dy));
+      const inset = Math.min(nodeWidth, nodeHeight) / 2 + 3;
+      const x1 = startX + dx / length * inset;
+      const y1 = startY + dy / length * inset;
+      const x2 = endX - dx / length * inset;
+      const y2 = endY - dy / length * inset;
+      const line = svgElement("line");
+      line.classList.add("diagram-edge");
+      line.setAttribute("x1", String(x1));
+      line.setAttribute("y1", String(y1));
+      line.setAttribute("x2", String(x2));
+      line.setAttribute("y2", String(y2));
+      svg.append(line);
+      if (edge.arrow) {
+        const size = 9;
+        const ux = dx / length;
+        const uy = dy / length;
+        const baseX = x2 - ux * size;
+        const baseY = y2 - uy * size;
+        const arrow = svgElement("polygon");
+        arrow.classList.add("diagram-arrow");
+        arrow.setAttribute(
+          "points",
+          `${x2},${y2} ${baseX - uy * size * 0.55},${
+            baseY + ux * size * 0.55
+          } ${baseX + uy * size * 0.55},${baseY - ux * size * 0.55}`,
+        );
+        svg.append(arrow);
+      }
+      if (edge.label) {
+        const edgeLabel = svgElement("text");
+        edgeLabel.classList.add("diagram-edge-label");
+        edgeLabel.setAttribute("x", String((x1 + x2) / 2));
+        edgeLabel.setAttribute("y", String((y1 + y2) / 2 - 7));
+        edgeLabel.setAttribute("text-anchor", "middle");
+        edgeLabel.textContent = edge.label.length > 32
+          ? edge.label.slice(0, 31) + "…"
+          : edge.label;
+        svg.append(edgeLabel);
+      }
+    }
+
+    for (const item of diagram.nodes) {
+      const position = positions.get(item.id);
+      let shape;
+      if (item.shape === "diamond") {
+        shape = svgElement("polygon");
+        shape.setAttribute(
+          "points",
+          `${position.x + nodeWidth / 2},${position.y} ${
+            position.x + nodeWidth
+          },${position.y + nodeHeight / 2} ${position.x + nodeWidth / 2},${
+            position.y + nodeHeight
+          } ${position.x},${position.y + nodeHeight / 2}`,
+        );
+      } else {
+        shape = svgElement("rect");
+        shape.setAttribute("x", String(position.x));
+        shape.setAttribute("y", String(position.y));
+        shape.setAttribute("width", String(nodeWidth));
+        shape.setAttribute("height", String(nodeHeight));
+        if (item.shape === "rounded") {
+          shape.setAttribute("rx", String(nodeHeight / 2));
+        }
+      }
+      shape.classList.add("diagram-node");
+      svg.append(shape);
+      const text = svgElement("text");
+      text.classList.add("diagram-node-label");
+      text.setAttribute("x", String(position.x + nodeWidth / 2));
+      text.setAttribute("y", String(position.y + nodeHeight / 2 + 5));
+      text.setAttribute("text-anchor", "middle");
+      text.textContent = item.label.length > 28
+        ? item.label.slice(0, 27) + "…"
+        : item.label;
+      svg.append(text);
+    }
+    viewport.append(svg);
+    figure.append(caption, viewport);
+    appendExactSource(figure, node.value, "Mermaid", false);
+    parent.append(figure);
+    return null;
+  };
+
+  const sanitizedSvgVisual = (parent: any, node: any): string | null => {
+    const result = sanitizeSvg(node.value);
+    if (!result.ok) return result.error;
+    const figure = document.createElement("figure");
+    figure.className = "visual-block svg-block";
+    const caption = document.createElement("figcaption");
+    const label = document.createElement("span");
+    label.className = "visual-label";
+    label.textContent = "SVG visual";
+    caption.append(label, copyButton(node.value, "SVG"));
+    const viewport = document.createElement("div");
+    viewport.className = "visual-viewport";
+    const build = (safeNode: any): any => {
+      const element = svgElement(safeNode.name);
+      for (const [name, value] of Object.entries(safeNode.attributes)) {
+        element.setAttribute(name, value);
+      }
+      for (const child of safeNode.children) {
+        element.append(
+          typeof child === "string"
+            ? document.createTextNode(child)
+            : build(child),
+        );
+      }
+      return element;
+    };
+    const svg = build(result.value.root);
+    svg.classList.add("diagram-svg");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", result.value.alternative);
+    viewport.append(svg);
+    figure.append(caption, viewport);
+    appendExactSource(figure, node.value, "SVG", false);
+    parent.append(figure);
+    return null;
+  };
+
+  const codeBlock = (parent: any, node: any) => {
+    const figure = document.createElement("figure");
+    figure.className = node.complete ? "code-block" : "code-block streaming";
+    const caption = document.createElement("figcaption");
+    const language = document.createElement("span");
+    language.className = "code-language";
+    language.textContent = node.language || "Code";
+    const button = copyButton(node.value, node.language || "code", "Copy");
+    caption.append(language, button);
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    if (node.language) code.dataset.language = node.language;
+    code.textContent = node.value;
+    pre.append(code);
+    figure.append(caption, pre);
+    parent.append(figure);
   };
 
   const block = (parent: any, node: BlockNode) => {
@@ -619,43 +915,13 @@ function markdownRuntime(): void {
       }
       scroller.append(table);
       parent.append(scroller);
+    } else if (node.type === "visual_block") {
+      const error = node.format === "mermaid"
+        ? mermaidVisual(parent, node)
+        : sanitizedSvgVisual(parent, node);
+      if (error) visualFallback(parent, node, error);
     } else {
-      const figure = document.createElement("figure");
-      figure.className = node.complete ? "code-block" : "code-block streaming";
-      const caption = document.createElement("figcaption");
-      const language = document.createElement("span");
-      language.className = "code-language";
-      language.textContent = node.language || "Code";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "copy-code";
-      button.textContent = "Copy";
-      button.setAttribute(
-        "aria-label",
-        `Copy ${node.language || "code"} snippet`,
-      );
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        try {
-          await copyText(node.value);
-          button.textContent = "Copied";
-        } catch {
-          button.textContent = "Copy failed";
-        } finally {
-          browser.setTimeout(() => {
-            button.textContent = "Copy";
-            button.disabled = false;
-          }, 1600);
-        }
-      });
-      caption.append(language, button);
-      const pre = document.createElement("pre");
-      const code = document.createElement("code");
-      if (node.language) code.dataset.language = node.language;
-      code.textContent = node.value;
-      pre.append(code);
-      figure.append(caption, pre);
-      parent.append(figure);
+      codeBlock(parent, node);
     }
   };
 
@@ -677,20 +943,35 @@ function markdownRuntime(): void {
   };
 }
 
-export const MARKDOWN_JAVASCRIPT = [
-  sourceLines,
-  appendText,
-  isSafeLinkDestination,
-  findClosingMarker,
-  parseLinkAt,
-  parseInline,
-  isThematicBreak,
-  fenceStart,
-  listItem,
-  splitTableRow,
-  tableAlignments,
-  beginsBlock,
-  parseMarkdown,
-  markdownRuntime,
-].map((definition) => definition.toString()).join("\n") +
+export const MARKDOWN_JAVASCRIPT =
+  `const MERMAID_SOURCE_LIMIT = ${MERMAID_SOURCE_LIMIT};\n` +
+  `const SVG_SOURCE_LIMIT = ${SVG_SOURCE_LIMIT};\n` +
+  [
+    mermaidNodeToken,
+    parseMermaid,
+    decodeXmlText,
+    findXmlTagEnd,
+    parseXmlAttributes,
+    safeSvgNumber,
+    safeSvgNumberList,
+    safeSvgColor,
+    safeSvgTransform,
+    sanitizeSvgAttributes,
+    safeSvgAlternative,
+    sanitizeSvg,
+    sourceLines,
+    appendText,
+    isSafeLinkDestination,
+    findClosingMarker,
+    parseLinkAt,
+    parseInline,
+    isThematicBreak,
+    fenceStart,
+    listItem,
+    splitTableRow,
+    tableAlignments,
+    beginsBlock,
+    parseMarkdown,
+    markdownRuntime,
+  ].map((definition) => definition.toString()).join("\n") +
   "\nmarkdownRuntime();\n";

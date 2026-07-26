@@ -355,6 +355,96 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   tab-size: 2;
 }
 .code-block code { white-space: pre; }
+.visual-block {
+  max-width: 100%;
+  margin: 15px 0;
+  overflow: hidden;
+  border: 1px solid #2a3944;
+  border-radius: 8px;
+  background: #111820;
+}
+.visual-block figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #293641;
+}
+.visual-label {
+  color: #b6c5cf;
+  font-size: 12px;
+  font-weight: 650;
+}
+.visual-viewport {
+  display: grid;
+  max-width: 100%;
+  max-height: 540px;
+  padding: 14px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: #f7fafb;
+}
+.diagram-svg {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 500px;
+  margin: auto;
+  color: #172129;
+}
+.diagram-node {
+  fill: #e7f0f4;
+  stroke: #375466;
+  stroke-width: 2;
+}
+.diagram-node-label {
+  fill: #172129;
+  font: 600 13px ui-sans-serif, system-ui, sans-serif;
+}
+.diagram-edge {
+  stroke: #587080;
+  stroke-width: 2;
+}
+.diagram-arrow { fill: #587080; }
+.diagram-edge-label {
+  fill: #354b59;
+  font: 11px ui-sans-serif, system-ui, sans-serif;
+  paint-order: stroke;
+  stroke: #f7fafb;
+  stroke-width: 4px;
+}
+.visual-source {
+  max-width: 100%;
+  border-top: 1px solid #293641;
+}
+.visual-source summary {
+  padding: 9px 11px;
+  color: #93a4b1;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+.visual-source pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border-top: 1px solid #293641;
+  color: #dce6ec;
+  font: 12px/1.58 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.visual-source code { white-space: pre; }
+.visual-error {
+  margin: 0;
+  padding: 10px 14px 0;
+  color: #efaaa2;
+  font-size: 12px;
+}
+.visual-fallback .visual-source { border-top: 0; }
 .copy-fallback { position: fixed; inset: -10000px auto auto -10000px; width: 1px; height: 1px; }
 .message.assistant .message-body:empty::after { content: "Waiting for Codex…"; color: #6f7c86; font-style: italic; }
 .message-terminal { margin: 9px 0 0; color: #7f8d98; font-size: 11px; }

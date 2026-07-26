@@ -221,7 +221,7 @@ Deno.test("fenced code retains its exact source for the copy action", () => {
   );
   assert.match(
     MARKDOWN_JAVASCRIPT,
-    /copyText\(node\.value\)/,
+    /copyButton\(node\.value, node\.language \|\| "code", "Copy"\)/,
   );
 });
 
