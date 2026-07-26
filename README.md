@@ -22,9 +22,12 @@ Follow-up prompts reuse the same native thread until Vantage closes. Stop
 remains pending until Codex reports a terminal state; completed, interrupted,
 and retryable failed turns make the prompt usable again.
 
-Vantage deliberately does not persist or resume conversations and does not
-implement multiple conversations, queued turns, steering, model controls,
-approvals, rich activity, or write-enabled work.
+The current UI remains session-only. Milestone 3 issue #25 establishes the
+transactional saved-project/conversation foundation and proves exact durable
+native resume; the project registry and integrated relaunch/switching surfaces
+remain in issues #26 and #27. Vantage does not implement multiple conversations,
+queued turns, steering, model controls, approvals, rich activity, or
+write-enabled work.
 
 Build the packaged application and run all repository checks with:
 
@@ -48,12 +51,23 @@ deno task smoke /path/to/repository \
   "Which word did I ask you to remember?"
 ```
 
+Run the authenticated two-process durable resume proof with:
+
+```sh
+deno task native-resume-proof /path/to/repository
+```
+
+The proof starts a non-ephemeral native thread under the fixed read-only policy,
+replaces app-server, resumes the exact thread ID, verifies context continuity,
+archives the temporary proof thread, and reaps both owned processes.
+
 ## Documentation
 
 - [Documentation map](docs/README.md)
 - [Product foundation](docs/FOUNDATION.md)
 - [Architecture overview](docs/architecture/README.md)
 - [Rich response rendering](docs/architecture/rich-response-rendering.md)
+- [Saved projects and conversations](docs/architecture/saved-conversations.md)
 - [First vertical slice](docs/architecture/vertical-slice.md)
 - [Codex app-server integration](docs/architecture/codex-app-server.md)
 - [Reliability and validation](docs/architecture/reliability.md)

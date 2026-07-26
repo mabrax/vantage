@@ -68,6 +68,13 @@ Consistent names matter because Codex and Vantage both have lifecycle concepts:
 A live session is not the conversation's durable identity. Closing a process must not make a thread
 disappear.
 
+The first durable implementation stores only Vantage-owned registry,
+native-ID mapping, literal prompt, ordered raw assistant source, terminal
+projection, and preferences in one local transactional database. A serialized
+host-side owner controls that database; Codex history and repositories remain
+external, and the WebView receives snapshots rather than storage or process
+authority.
+
 ## Product surfaces
 
 ### Projects

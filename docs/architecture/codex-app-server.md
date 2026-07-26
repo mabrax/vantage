@@ -1,16 +1,18 @@
 # Codex app-server integration
 
-Status: **Accepted native boundary for the session-only Milestone 1**
+Status: **Accepted native boundary through the Milestone 3 durable-resume foundation**
 
-This document owns the Codex-specific mechanics needed by the
-[first vertical slice](vertical-slice.md). The [milestone map](../milestones/01-codex-chat.md) owns
-scope; app-server capabilities not named here do not enter the milestone.
+This document owns Codex-specific mechanics used by the
+[first vertical slice](vertical-slice.md) and promoted by the
+[saved-conversation contract](saved-conversations.md). Milestone maps own scope;
+app-server capabilities not named here do not enter the active vertical.
 
 ## Decision
 
 Vantage launches one locally available `codex app-server` behind the privileged Deno host. It uses
-the user's existing Codex authentication and default model, starts one native thread in the selected
-repository, and keeps that process and thread only for the open app session.
+the user's existing Codex authentication and default model. Milestones 1 and 2 started an
+ephemeral native thread for the open app session. Milestone 3 promotes non-ephemeral thread
+creation and exact-ID resume while keeping the process disposable.
 
 The host speaks the native JSONL-over-stdio protocol. The WebView never connects to app-server,
 handles credentials, or receives raw process authority.
@@ -25,9 +27,14 @@ handles credentials, or receives raw process authority.
 | Ask a follow-up | start another turn on the same in-memory native thread |
 | Stop a response | request interruption and wait for a terminal state or connection failure |
 | Close Vantage | close or terminate the Vantage-owned app-server process |
+| Create durable native context | `thread/start` with `ephemeral: false` and persist the returned ID |
+| Relaunch or switch back | `thread/resume` by persisted ID and require the same ID in the response |
+| Classify unavailable context | preserve saved source as read-only and mark the mapping non-resumable |
 
-The implementation validates the request, response, and notification shapes it consumes. It does
-not generate, commit, or certify the complete app-server protocol.
+Every thread start, resume, and turn repeats the canonical repository and fixed
+`approvalPolicy: "never"`/read-only policy. The implementation validates the
+request, response, and notification shapes it consumes. It does not generate,
+commit, or certify the complete app-server protocol.
 
 ## Process boundary
 
@@ -35,10 +42,11 @@ The Deno host:
 
 - resolves and launches Codex without shell interpolation;
 - sets the selected canonical Git repository as the working directory;
-- initializes one connection and native thread;
+- initializes one connection and starts or resumes one native thread;
 - serializes protocol writes;
 - drains stdout and stderr separately;
 - correlates only the requests needed by the two milestone issues;
+- starts durable threads or resumes the exact persisted native ID for Milestone 3;
 - exposes assistant text and terminal lifecycle state to the UI; and
 - makes idle and active close paths terminate the owned process.
 
@@ -60,12 +68,31 @@ stateDiagram-v2
     Closing --> [*]: process exited
 ```
 
-Only one turn may be active. A second prompt is rejected while native acceptance is unresolved or a
-turn is running. Interruption remains pending until the native terminal state or connection failure
-is known. Uncertain input is never submitted again automatically.
+Only the selected project's live session may have one native turn active. A
+second prompt is rejected while native acceptance is unresolved or that turn is
+running. Other projects may retain recovered unresolved durable history, but
+those rows are read-only and are not live native turns. Interruption remains
+pending until the native terminal state or connection failure is known.
+Uncertain input is never submitted again automatically.
 
-The native thread ID is held only to continue the conversation during the current app session.
-Vantage does not persist it or claim restart recovery.
+For the Milestone 3 integrated path, the native thread ID is committed through
+the serialized persistence owner and outlives the live session. A new process
+uses `thread/resume` with that ID; returned identity must match. Transcript
+replay, client-supplied history, and silent replacement threads cannot satisfy
+resume.
+
+The issue #25 proof exercises this sequence directly:
+
+1. initialize authenticated app-server A;
+2. start a non-ephemeral read-only thread and complete a marker turn;
+3. terminate and reap A;
+4. initialize app-server B;
+5. resume the same ID and complete a follow-up that requires the marker; and
+6. archive the explicitly temporary proof thread and reap B.
+
+Application project removal does not call native archive or delete. The current
+API exposes archive, unarchive, and delete, but Codex history is not
+Vantage-owned.
 
 ## Repository and runtime policy
 
@@ -79,10 +106,10 @@ implement login or token storage.
 
 ## Deferred capabilities
 
-The following app-server capabilities are not scheduled for Milestone 1:
+The following app-server capabilities remain outside Milestone 3:
 
 - model catalogs, reasoning selectors, profiles, and configuration editing;
-- persisted thread identity, list/read/resume, restart reconciliation, fork, rollback, and archive;
+- native thread list/history UI, fork, rollback, rename, delete, and application-driven archive;
 - approvals, structured input, write-enabled work, and persistent policy;
 - rich tool, plan, diff, usage, and file-change projection;
 - attachments, application-specific MCP tools, dynamic tools, and handoffs;

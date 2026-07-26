@@ -2,6 +2,12 @@
 
 Status: **Accepted interaction contract for Milestone 1**
 
+Milestone 3 deliberately extends this session-only baseline. Exact durable
+project, conversation, resume, reconciliation, removal, and re-add behavior is
+owned by [saved projects and conversations](saved-conversations.md); this
+document remains the Milestone 1 contract rather than being retroactively
+rewritten.
+
 The [GitHub milestone](https://github.com/mabrax/vantage/milestone/1) owns the product outcome and
 vertical-level exclusions. The [milestone map](../milestones/01-codex-chat.md) owns issue
 sequencing and invariants. This document defines how the in-scope conversation behaves.

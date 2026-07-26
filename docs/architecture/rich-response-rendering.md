@@ -25,7 +25,9 @@ Markdown.
 
 This is a presentation projection only. Native acceptance, delta ordering,
 completion, interruption, failure, follow-up, retry, stop, and cleanup remain
-owned by the existing session controller and event path.
+owned by the session controller and event path. In Milestone 3, the
+[saved-conversation boundary](saved-conversations.md) persists the same ordered
+raw source, never this parsed tree or its DOM.
 
 ## Source and projection contract
 
@@ -43,6 +45,12 @@ For every assistant turn:
 The raw source is transcript truth. The parsed tree and DOM are disposable
 views. Parsing cannot edit the raw source, emit native commands, change turn
 state, reach another transcript entry, or reorder prior content.
+
+On restore, Vantage concatenates persisted raw fragments by their exact sequence
+and runs this same parser/renderer from scratch. No rendered HTML, DOM,
+provider-selected executable representation, or cached visual tree enters
+SQLite. The offline CSP and source-copy behavior are identical for live and
+restored source.
 
 Reparsing the bounded response-so-far deliberately favors deterministic
 snapshots over an incremental parser with hidden partial state. Chunk boundaries
