@@ -254,13 +254,14 @@ export const HTML = `<!doctype html>
 
         <div id="project-empty" class="project-empty">
           <strong>Add your first local Git repository</strong>
-          <p>Paste an accessible path below. Vantage saves its registration and one durable native Codex conversation.</p>
+          <p>Choose a folder below. Vantage saves its registration and one durable native Codex conversation.</p>
         </div>
 
         <nav id="project-list" class="project-list" aria-label="Saved projects"></nav>
 
         <form id="repository-form" class="add-project">
-          <label for="repository-path">Add repository path</label>
+          <button id="repository-choose" class="secondary" type="button">Choose folder…</button>
+          <label for="repository-path">Or paste a repository path</label>
           <input id="repository-path" name="repository" type="text" autocomplete="off" spellcheck="false" aria-describedby="repository-help" placeholder="/Users/you/code/project" required>
           <p id="repository-help">Nested paths and symlink aliases resolve to one canonical Git root.</p>
           <button id="repository-submit" type="submit">Add project</button>
@@ -507,6 +508,7 @@ h2 { margin-bottom: 6px; font-size: 18px; letter-spacing: -0.01em; }
 }
 .project-remove:hover:not(:disabled) { background: rgba(143, 71, 66, 0.25); color: #efaaa2; }
 .add-project { margin-top: auto; padding-top: 16px; border-top: 1px solid #202a34; }
+.add-project #repository-choose { margin-bottom: 12px; }
 .add-project input { margin-bottom: 7px; }
 .add-project p { margin-bottom: 10px; font-size: 10px; }
 .add-project button { width: 100%; min-height: 40px; }
@@ -927,6 +929,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   const transitionProjectRemoval = (${transitionProjectRemoval.toString()});
   const nativeBindings = globalThis.bindings;
   const repositoryForm = document.querySelector("#repository-form");
+  const repositoryChoose = document.querySelector("#repository-choose");
   const repositoryInput = document.querySelector("#repository-path");
   const repositorySubmit = document.querySelector("#repository-submit");
   const projectEmpty = document.querySelector("#project-empty");
@@ -980,6 +983,7 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
   const setRepositoryBusy = (busy) => {
     registryBusy = busy;
     repositoryInput.disabled = busy || turnActive;
+    repositoryChoose.disabled = busy || turnActive;
     repositorySubmit.disabled = busy || turnActive;
     refreshProjects.disabled = busy || turnActive;
     unavailableRefresh.disabled = busy || turnActive;
@@ -1399,13 +1403,12 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     }
   };
 
-  repositoryForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!nativeBindings || registryBusy || turnActive) return;
-    setRepositoryBusy(true);
+  const addRepository = async (path, alreadyBusy = false) => {
+    if (!nativeBindings || (!alreadyBusy && registryBusy) || turnActive) return;
+    if (!alreadyBusy) setRepositoryBusy(true);
     setStatus("running", "Checking repository", "Vantage will save it only after canonical Git-root validation succeeds.");
     try {
-      const result = await nativeBindings.addProject(repositoryInput.value);
+      const result = await nativeBindings.addProject(path);
       if (result && result.ok) {
         repositoryInput.value = "";
         applyRegistry(result.snapshot);
@@ -1415,8 +1418,32 @@ export const JAVASCRIPT = MARKDOWN_JAVASCRIPT + `(() => {
     } catch (error) {
       hostFailure({ error }, "The project could not be added.");
     } finally {
+      if (!alreadyBusy) setRepositoryBusy(false);
+    }
+  };
+
+  repositoryChoose.addEventListener("click", async () => {
+    if (!nativeBindings || registryBusy || turnActive) return;
+    setRepositoryBusy(true);
+    try {
+      const result = await nativeBindings.chooseRepositoryDirectory();
+      if (!result || !result.ok) {
+        hostFailure(result, "The native folder chooser could not be opened.");
+        return;
+      }
+      if (result.path === null) return;
+      repositoryInput.value = result.path;
+      await addRepository(result.path, true);
+    } catch (error) {
+      hostFailure({ error }, "The native folder chooser could not be opened.");
+    } finally {
       setRepositoryBusy(false);
     }
+  });
+
+  repositoryForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await addRepository(repositoryInput.value);
   });
 
   promptForm.addEventListener("submit", async (event) => {

@@ -18,11 +18,12 @@ Prerequisites:
 deno task dev
 ```
 
-Paste a Git repository path into the sidebar, add more projects, and switch
-among them. Vantage canonicalizes each Git root, rejects aliases, remembers
-registration order and selection, and keeps unavailable saved paths visible for
-recovery or explicit removal. Project removal forgets only Vantage-owned
-metadata and leaves the repository and Codex-owned history untouched.
+Choose a Git repository folder from the sidebar, add more projects, and switch
+among them. Manual path entry remains available as a fallback. Vantage
+canonicalizes each Git root, rejects aliases, remembers registration order and
+selection, and keeps unavailable saved paths visible for recovery or explicit
+removal. Project removal forgets only Vantage-owned metadata and leaves the
+repository and Codex-owned history untouched.
 
 Literal prompts, ordered raw assistant source, and native terminal outcomes
 restore after project switches and app relaunch. Existing conversations resume

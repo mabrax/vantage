@@ -2,6 +2,7 @@ import { createCodexSession } from "./codex_client.ts";
 import { asVantageError, VantageError } from "./errors.ts";
 import type { SessionEvent } from "./events.ts";
 import { PersistenceOwner, StorageError } from "./persistence.ts";
+import { chooseLocalRepositoryDirectory } from "./native_folder_dialog.ts";
 import {
   ProjectRegistryController,
   type ProjectRegistryView,
@@ -111,6 +112,16 @@ window.bind("addProject", async (path: unknown) => {
   return await registryCommand((savedProjects) =>
     savedProjects.addProject(path)
   );
+});
+window.bind("chooseRepositoryDirectory", async () => {
+  try {
+    return {
+      ok: true as const,
+      path: await chooseLocalRepositoryDirectory(),
+    };
+  } catch (error) {
+    return failure(error);
+  }
 });
 window.bind("selectProject", async (
   projectId: unknown,

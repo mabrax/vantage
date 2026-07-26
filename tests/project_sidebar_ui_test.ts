@@ -17,6 +17,7 @@ Deno.test("saved-project sidebar exposes the complete empty, unavailable, select
       "project-empty",
       "project-list",
       "repository-form",
+      "repository-choose",
       "workspace-empty",
       "project-unavailable",
       "workspace-remove",
@@ -29,6 +30,9 @@ Deno.test("saved-project sidebar exposes the complete empty, unavailable, select
     assert.match(HTML, new RegExp(`id="${id}"`));
   }
   assert.match(HTML, /Add your first local Git repository/);
+  assert.match(HTML, /Choose a folder below/);
+  assert.match(HTML, /Choose folder…/);
+  assert.match(HTML, /Or paste a repository path/);
   assert.match(HTML, /one durable native Codex conversation/i);
   assert.match(HTML, /Remove from Vantage/);
   assert.match(CSS, /\.app-shell \{[\s\S]*grid-template-columns: 300px/);
@@ -42,8 +46,17 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
   assert.match(JAVASCRIPT, /path\.textContent = project\.canonicalRoot/);
   assert.match(
     JAVASCRIPT,
-    /nativeBindings\.addProject\(repositoryInput\.value\)/,
+    /addRepository\(repositoryInput\.value\)/,
   );
+  assert.match(
+    JAVASCRIPT,
+    /nativeBindings\.chooseRepositoryDirectory\(\)/,
+  );
+  assert.match(
+    JAVASCRIPT,
+    /repositoryInput\.value = result\.path;[\s\S]*addRepository\(result\.path, true\)/,
+  );
+  assert.match(JAVASCRIPT, /if \(result\.path === null\) return/);
   assert.match(
     JAVASCRIPT,
     /nativeBindings\.selectProject\(projectId, confirmed\)/,
@@ -268,6 +281,10 @@ Deno.test("registry busy state guards and disables every competing project mutat
   );
   assert.match(
     JAVASCRIPT,
+    /repositoryChoose\.disabled = busy \|\| turnActive/,
+  );
+  assert.match(
+    JAVASCRIPT,
     /select\.disabled = registryBusy/,
   );
   assert.match(JAVASCRIPT, /remove\.disabled = registryBusy/);
@@ -286,6 +303,10 @@ Deno.test("registry busy state guards and disables every competing project mutat
   assert.match(
     JAVASCRIPT,
     /finally \{\s+setRepositoryBusy\(false\);\s+\}/,
+  );
+  assert.match(
+    JAVASCRIPT,
+    /repositoryChoose\.addEventListener\("click", async \(\) => \{[\s\S]*setRepositoryBusy\(true\);[\s\S]*chooseRepositoryDirectory\(\)[\s\S]*finally \{\s+setRepositoryBusy\(false\);/,
   );
 });
 
