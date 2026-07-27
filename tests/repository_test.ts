@@ -8,7 +8,7 @@ Deno.test("repository validation rejects missing and non-Git paths", async () =>
     (error) =>
       error instanceof VantageError &&
       error.code === "repository" &&
-      /enter a local Git repository path/i.test(error.message),
+      /choose a local Git repository folder/i.test(error.message),
   );
   await assert.rejects(
     () => validateRepository("/path/that/vantage/does/not/have"),

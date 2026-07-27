@@ -41,7 +41,7 @@ characters that resemble markup; it is always re-rendered through the
 A project is identified by the canonical Git top-level path returned by the
 existing repository validator:
 
-1. trim the user-entered path;
+1. receive the folder selected through the native chooser;
 2. resolve filesystem aliases with `realPath`;
 3. require an accessible directory;
 4. run `git -C <candidate> rev-parse --show-toplevel` without shell

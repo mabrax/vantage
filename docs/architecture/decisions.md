@@ -97,15 +97,13 @@ Date: 2026-07-22
 
 Status: **Accepted and implemented through Milestone 3 issue #26**
 
-Deno Desktop does not currently provide a first-class native folder picker. The
-first slice accepts a pasted or typed path, canonicalizes it, and verifies that
-it is an accessible Git repository. D-010 accepts that canonical root as the
-durable unique project key. Issue #26 implements saved registration, ordered
-sidebar selection, availability, and non-destructive removal around that
-identity.
-
-A native picker can replace the input when the runtime adds one or a focused
-integration is proven.
+The current Deno Desktop runtime does not expose a first-class folder picker.
+Vantage uses a narrowly isolated macOS native folder chooser boundary to supply
+the selected repository folder, then canonicalizes and verifies it as an
+accessible Git repository. D-010 accepts that canonical root as the durable
+unique project key.
+Issue #26 implements saved registration, ordered sidebar selection,
+availability, and non-destructive removal around that identity.
 
 ## D-008 — Keep thread and live session distinct
 

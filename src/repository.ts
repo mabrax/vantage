@@ -19,7 +19,7 @@ export async function validateRepository(
   runner: CommandRunner = runCommand,
 ): Promise<string> {
   if (typeof input !== "string" || input.trim().length === 0) {
-    throw repositoryError("Enter a local Git repository path.");
+    throw repositoryError("Choose a local Git repository folder.");
   }
 
   let candidate: string;
@@ -62,6 +62,6 @@ function repositoryError(message: string): VantageError {
   return new VantageError(
     "repository",
     message,
-    "Correct the path and try again. Codex has not been started.",
+    "Choose another accessible Git repository folder and try again. Codex has not been started.",
   );
 }
