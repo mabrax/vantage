@@ -872,6 +872,9 @@ function markdownRuntime(): void {
       line.setAttribute("y1", String(y1));
       line.setAttribute("x2", String(x2));
       line.setAttribute("y2", String(y2));
+      if (edge.dashed) {
+        line.setAttribute("stroke-dasharray", "6 4");
+      }
       svg.append(line);
       const appendArrow = (
         tipX: number,

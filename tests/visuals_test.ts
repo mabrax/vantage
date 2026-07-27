@@ -179,3 +179,45 @@ Deno.test("visual controls expose exact source, accessible images, and contained
     /\.diagram-svg \{[\s\S]*width: 100%;[\s\S]*max-width: 100%;/,
   );
 });
+
+Deno.test("Mermaid dotted edges parse with dashed flag", () => {
+  const result = parseMermaid(`flowchart LR
+REG["Registry"]
+REPO[("Repository")]
+REG -.->|"canonicalize and validate"| REPO`);
+  assert.equal(result.ok, true);
+  if (!result.ok || result.value.kind !== "flowchart") return;
+  assert.equal(result.value.edges.length, 1);
+  assert.equal(result.value.edges[0].dashed, true);
+  assert.equal(result.value.edges[0].arrow, "forward");
+  assert.equal(result.value.edges[0].label, "canonicalize and validate");
+});
+
+Deno.test("Mermaid solid edges have dashed false", () => {
+  const result = parseMermaid(`flowchart LR
+A["A"]
+B["B"]
+A --> B`);
+  assert.equal(result.ok, true);
+  if (!result.ok || result.value.kind !== "flowchart") return;
+  assert.equal(result.value.edges[0].dashed, false);
+  assert.equal(result.value.edges[0].arrow, "forward");
+});
+
+Deno.test("Mermaid bidirectional dotted edge yields both with dashed true", () => {
+  const result = parseMermaid(`flowchart LR
+A["A"]
+B["B"]
+A <-.-> B`);
+  assert.equal(result.ok, true);
+  if (!result.ok || result.value.kind !== "flowchart") return;
+  assert.equal(result.value.edges[0].dashed, true);
+  assert.equal(result.value.edges[0].arrow, "both");
+});
+
+Deno.test("Mermaid rejects arrows that only resemble the dotted forms", () => {
+  for (const line of ["A -x-> B", "A -1-> B", "A <-Z-> B", "A -.-.-> B"]) {
+    const result = parseMermaid(`flowchart LR\n${line}`);
+    assert.equal(result.ok, false);
+  }
+});
