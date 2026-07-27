@@ -56,7 +56,9 @@ Deno.test("native folder chooser exposes host launch failures as actionable erro
       error instanceof VantageError &&
       error.code === "invalid_command" &&
       /native folder chooser/i.test(error.message) &&
-      /paste an accessible local Git repository path/i.test(error.action),
+      /retry choosing an accessible local Git repository folder/i.test(
+        error.action,
+      ),
   );
 
   await assert.rejects(
@@ -80,6 +82,8 @@ Deno.test("native folder chooser reports the explicit platform limitation", asyn
     (error) =>
       error instanceof VantageError &&
       /only on macOS/i.test(error.message) &&
-      /paste an accessible local Git repository path/i.test(error.action),
+      /retry choosing an accessible local Git repository folder/i.test(
+        error.action,
+      ),
   );
 });

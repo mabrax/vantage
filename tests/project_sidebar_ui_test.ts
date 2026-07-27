@@ -16,7 +16,6 @@ Deno.test("saved-project sidebar exposes the complete empty, unavailable, select
     const id of [
       "project-empty",
       "project-list",
-      "repository-form",
       "repository-choose",
       "workspace-empty",
       "project-unavailable",
@@ -32,7 +31,10 @@ Deno.test("saved-project sidebar exposes the complete empty, unavailable, select
   assert.match(HTML, /Add your first local Git repository/);
   assert.match(HTML, /Choose a folder below/);
   assert.match(HTML, /Choose folder…/);
-  assert.match(HTML, /Or paste a repository path/);
+  assert.match(HTML, /validates the selected folder/i);
+  assert.doesNotMatch(HTML, /<input\b/);
+  assert.doesNotMatch(HTML, /<form id="repository/);
+  assert.doesNotMatch(HTML, /<button id="repository-[^"]*"[^>]*type="submit"/);
   assert.match(HTML, /one durable native Codex conversation/i);
   assert.match(HTML, /Remove from Vantage/);
   assert.match(CSS, /\.app-shell \{[\s\S]*grid-template-columns: 300px/);
@@ -46,17 +48,14 @@ Deno.test("sidebar commands render host snapshots with text-only project identit
   assert.match(JAVASCRIPT, /path\.textContent = project\.canonicalRoot/);
   assert.match(
     JAVASCRIPT,
-    /addRepository\(repositoryInput\.value\)/,
-  );
-  assert.match(
-    JAVASCRIPT,
     /nativeBindings\.chooseRepositoryDirectory\(\)/,
   );
   assert.match(
     JAVASCRIPT,
-    /repositoryInput\.value = result\.path;[\s\S]*addRepository\(result\.path, true\)/,
+    /if \(result\.path === null\) return;[\s\S]*addRepository\(result\.path, true\)/,
   );
   assert.match(JAVASCRIPT, /if \(result\.path === null\) return/);
+  assert.doesNotMatch(JAVASCRIPT, /repository\w*\.addEventListener\("submit"/);
   assert.match(
     JAVASCRIPT,
     /nativeBindings\.selectProject\(projectId, confirmed\)/,
@@ -275,10 +274,6 @@ Deno.test("active recovered turn projects Unresolved without enabling continuati
 
 Deno.test("registry busy state guards and disables every competing project mutation without blocking active-turn removal", () => {
   assert.match(JAVASCRIPT, /let registryBusy = false/);
-  assert.match(
-    JAVASCRIPT,
-    /repositoryInput\.disabled = busy \|\| turnActive/,
-  );
   assert.match(
     JAVASCRIPT,
     /repositoryChoose\.disabled = busy \|\| turnActive/,

@@ -66,6 +66,6 @@ function chooserError(message: string): VantageError {
   return new VantageError(
     "invalid_command",
     message,
-    "Paste an accessible local Git repository path below and retry. Codex has not been started.",
+    "Retry choosing an accessible local Git repository folder. Codex has not been started.",
   );
 }

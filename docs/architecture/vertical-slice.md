@@ -15,8 +15,8 @@ sequencing and invariants. This document defines how the in-scope conversation b
 ## Primary user journey
 
 1. Launch the packaged Vantage application on the primary development platform.
-2. Paste or type the path to one local Git repository.
-3. See an actionable state if the path is invalid or Codex is unavailable or unauthenticated.
+2. Choose one local Git repository folder.
+3. See an actionable state if the selected folder is invalid or Codex is unavailable or unauthenticated.
 4. Start a session using the user's existing Codex defaults and fixed read-only access.
 5. Ask a question whose answer requires inspecting the selected repository.
 6. See the prompt, streamed assistant text, and a truthful terminal state.
@@ -28,7 +28,7 @@ sequencing and invariants. This document defines how the in-scope conversation b
 
 ### Repository selection
 
-- Accept one typed or pasted local path before the conversation begins.
+- Accept one folder selected through the native chooser before the conversation begins.
 - Canonicalize the path and verify it is an accessible Git repository.
 - Start no Codex process for an invalid path.
 - Keep the selected repository fixed after the native conversation begins.

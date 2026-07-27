@@ -83,7 +83,7 @@ function harness(fake = new FakeCodex()) {
           new VantageError(
             "repository",
             "Invalid repository.",
-            "Correct the path and retry.",
+            "Choose another repository folder and retry.",
           ),
         );
       }
@@ -102,7 +102,7 @@ Deno.test("invalid repositories launch no Codex process and remain retryable", a
     type: "session_failed",
     code: "repository",
     message: "Invalid repository.",
-    action: "Correct the path and retry.",
+    action: "Choose another repository folder and retry.",
   }]);
 
   assert.equal((await h.controller.startSession("/repo")).phase, "ready");
