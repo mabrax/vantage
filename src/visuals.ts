@@ -12,6 +12,7 @@ export interface MermaidEdge {
   readonly to: string;
   readonly label: string;
   readonly arrow: "none" | "forward" | "both";
+  readonly dashed: boolean;
 }
 
 export interface MermaidGroup {
@@ -306,8 +307,9 @@ export function parseMermaidFlowchart(
       groupStack.pop();
       continue;
     }
-    const edge = /^(.*?)\s*(<-->|-->|---)\s*(?:\|([^|\r\n]{1,160})\|\s*)?(.*?)$/
-      .exec(line);
+    const edge =
+      /^(.*?)\s*(<-\.->|<-->|-\.->|-->|-\.-|---)\s*(?:\|([^|\r\n]{1,160})\|\s*)?(.*?)$/
+        .exec(line);
     if (edge) {
       const from = mermaidNodeToken(edge[1]);
       const to = mermaidNodeToken(edge[4]);
@@ -320,15 +322,19 @@ export function parseMermaidFlowchart(
           error: `Invalid Mermaid statement on line ${lineIndex + 1}.`,
         };
       }
+      const arrowToken = edge[2];
+      const isDotted = arrowToken === "<-.->" || arrowToken === "-.->" ||
+        arrowToken === "-.-";
       edges.push({
         from: from.id,
         to: to.id,
         label,
-        arrow: edge[2] === "<-->"
+        arrow: arrowToken === "<-.->" || arrowToken === "<-->"
           ? "both"
-          : edge[2] === "-->"
+          : arrowToken === "-.->" || arrowToken === "-->"
           ? "forward"
           : "none",
+        dashed: isDotted,
       });
     } else {
       const node = mermaidNodeToken(line);
